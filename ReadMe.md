@@ -31,14 +31,34 @@ A high-performance, reliable URL shortener built in ASP.NET Core with PostgreSQL
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Prerequisites
 
-Update `appsettings.json` with your local or cloud setup:
+Before running the project locally, make sure the following dependencies are installed and configured:
+
+### ✅ Required Software
+
+- [.NET 8 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
+- [PostgreSQL](https://www.postgresql.org/download/) (default connection: `localhost:5432`)
+- [Redis](https://redis.io/download/) (default connection: `localhost:6379`)
+- [RabbitMQ](https://www.rabbitmq.com/download.html) (default connection: `localhost:5672`)
+
+You can run Redis & RabbitMQ via Docker:
+
+```bash
+docker run -d --name redis -p 6379:6379 redis
+docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+```
+
+---
+
+### ⚙️ Configuration File
+
+Make sure to create or update `appsettings.json` in the root directory with the following:
 
 ```json
 {
   "ConnectionStrings": {
-    "Postgres": "Server=localhost;Port=5432;Database=url_shortener;User Id=postgres;Password=your_password;"
+    "Postgres": "Server=localhost;Port=5432;Database=url_shortener;User Id=postgres;Password=yourpassword;"
   },
   "Redis": {
     "ConnectionString": "localhost:6379"
@@ -49,7 +69,14 @@ Update `appsettings.json` with your local or cloud setup:
     "Username": "guest",
     "Password": "guest",
     "QueueName": "click-events"
-  }
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
 }
 ```
 
@@ -149,3 +176,4 @@ plantuml architecture.puml -o docs/
 
 Crafted by Idan
 Feedback and PRs welcome!
+````

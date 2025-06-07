@@ -30,6 +30,45 @@ A high-performance, reliable URL shortener built in ASP.NET Core with PostgreSQL
 | Tests         | xUnit + Benchmark Tool          |
 
 ---
+### 📊 Database Schema (PostgreSQL)
+
+The application uses a single core table to persist short URL mappings and track clicks:
+
+#### 🗂️ `short_urls`
+
+| Column         | Type        | Description                           |
+| -------------- | ----------- | ------------------------------------- |
+| `code`         | `text`      | Primary key – the unique short code   |
+| `original_url` | `text`      | The original long URL                 |
+| `click_count`  | `integer`   | Total number of clicks (write-behind) |
+| `created_at`   | `timestamp` | Timestamp of creation (UTC)           |
+
+#### 🧾 SQL Definition
+
+```sql
+CREATE TABLE short_urls (
+    code TEXT PRIMARY KEY,
+    original_url TEXT NOT NULL,
+    click_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL
+);
+```
+
+#### 🧠 Design Notes
+
+* **Primary key** on `code` ensures uniqueness and fast lookups.
+* `click_count` is updated **asynchronously** by the RabbitMQ consumer.
+* `created_at` supports future features like expiration or reporting.
+---
+
+If you'd like, I can also prepare:
+
+* A `schema.sql` file in the repo
+* A PlantUML-based ER diagram for documentation
+* A `seed.sql` to pre-populate the database with test data
+
+Would you like me to add those as well?
+
 
 ## ⚙️ Prerequisites
 
@@ -160,16 +199,6 @@ To generate the diagram locally, run:
 ```bash
 plantuml architecture.puml -o docs/
 ```
-
----
-
-## ✨ Future Improvements
-
-- Add Prometheus-compatible metrics exporter
-- Add Link Expiration (TTL)
-- Support user-specific stats
-- Add authentication layer
-
 ---
 
 ## 🙌 Credits

@@ -28,7 +28,7 @@ class Program
             await semaphore.WaitAsync();
             try
             {
-                await Task.Delay(i * 3); // מרווח קטן למניעת עומס לא טבעי
+                await Task.Delay(i * 3);
                 var sw = Stopwatch.StartNew();
                 var response = await client.GetAsync(inputUrl);
                 sw.Stop();

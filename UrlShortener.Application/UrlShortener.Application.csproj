@@ -16,4 +16,12 @@
     <ProjectReference Include="..\UrlShortener.Repository\UrlShortener.Repository.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\SharedConfig\appsettings.json">
+      <Link>appsettings.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+
 </Project>

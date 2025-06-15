@@ -482,3 +482,17 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# === Docker ===
+.docker/
+docker-compose.override.yml
+*.log
+*.pid
+*.seed
+*.bak
+
+# Docker volumes
+pgdata/
+
+# === Build Artifacts ===
+/out/

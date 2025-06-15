@@ -1,18 +1,20 @@
-````markdown
 # 🔗 URL Shortening Service
 
-A high-performance, reliable URL shortener built in ASP.NET Core with PostgreSQL, Redis, and RabbitMQ.
+A production-ready, high-performance URL shortener built in **ASP.NET Core 8**, using **PostgreSQL**, **Redis**, **RabbitMQ**, and **FluentMigrator**.  
+Includes full observability, health checks, async processing, and Docker-based deployment.
 
 ---
 
 ## 🚀 Features
 
 - ✅ Shorten long URLs via REST API
-- ✅ Redirect short codes (with fast cache layer)
+- ✅ Redirect short codes (with fast Redis cache)
 - ✅ Track click counts asynchronously via RabbitMQ
+- ✅ Database schema managed with FluentMigrator
 - ✅ Metrics middleware for observability
 - ✅ Resilience patterns (retry, circuit breaker)
 - ✅ Health checks for DB, Redis, RabbitMQ
+- ✅ Dockerized end-to-end (incl. migrations)
 - ✅ Performance-tested (P95 < 20ms)
 
 ---
@@ -25,25 +27,60 @@ A high-performance, reliable URL shortener built in ASP.NET Core with PostgreSQL
 | DB Access     | NHibernate + PostgreSQL         |
 | Cache         | Redis                           |
 | Queue         | RabbitMQ                        |
+| Migrations    | FluentMigrator                  |
 | Metrics       | Custom Middleware               |
-| Retry/Faults  | Microsoft.Extensions.Resilience |
-| Tests         | xUnit + Benchmark Tool          |
+| Resilience    | Microsoft.Extensions.Resilience |
+| Observability | Health Checks, Logs             |
+| Testing       | xUnit + Benchmarking Tool       |
 
 ---
-### 📊 Database Schema (PostgreSQL)
 
-The application uses a single core table to persist short URL mappings and track clicks:
+## 🐳 Run with Docker (Recommended)
 
-#### 🗂️ `short_urls`
+The project includes a full Docker setup with:
 
-| Column         | Type        | Description                           |
-| -------------- | ----------- | ------------------------------------- |
-| `code`         | `text`      | Primary key – the unique short code   |
-| `original_url` | `text`      | The original long URL                 |
-| `click_count`  | `integer`   | Total number of clicks (write-behind) |
-| `created_at`   | `timestamp` | Timestamp of creation (UTC)           |
+- PostgreSQL, Redis, RabbitMQ
+- FluentMigrator runner
+- Health-check based startup script
 
-#### 🧾 SQL Definition
+### 📦 Start everything (including migrations)
+
+```bash
+bash start.sh
+```
+
+Once started:
+
+- Web App: [http://localhost:5000](http://localhost:5000)
+- Swagger: [http://localhost:5000/swagger](http://localhost:5000/swagger)
+- Health: [http://localhost:5000/health](http://localhost:5000/health)
+- RabbitMQ UI: [http://localhost:15672](http://localhost:15672)  
+  _(user/pass from `.env`)_
+- PgAdmin (optional): [http://localhost:5050](http://localhost:5050)
+
+To shut down:
+
+```bash
+docker-compose down
+```
+
+---
+
+## 📄 Database Schema
+
+Managed by **FluentMigrator**  
+See: [`InitialCreate.cs`](UrlShortener.Migrations/Migrations/InitialCreate.cs)
+
+### 🗂️ Table: `short_urls`
+
+| Column         | Type        | Description                          |
+| -------------- | ----------- | ------------------------------------ |
+| `code`         | `text`      | Primary key – the unique short code  |
+| `original_url` | `text`      | The original long URL                |
+| `click_count`  | `integer`   | Total number of clicks (async write) |
+| `created_at`   | `timestamp` | Timestamp of creation (UTC)          |
+
+#### SQL Definition
 
 ```sql
 CREATE TABLE short_urls (
@@ -54,119 +91,9 @@ CREATE TABLE short_urls (
 );
 ```
 
-#### 🧠 Design Notes
-
-* **Primary key** on `code` ensures uniqueness and fast lookups.
-* `click_count` is updated **asynchronously** by the RabbitMQ consumer.
-* `created_at` supports future features like expiration or reporting.
----
-
-If you'd like, I can also prepare:
-
-* A `schema.sql` file in the repo
-* A PlantUML-based ER diagram for documentation
-* A `seed.sql` to pre-populate the database with test data
-
-Would you like me to add those as well?
-
-
-## ⚙️ Prerequisites
-
-Before running the project locally, make sure the following dependencies are installed and configured:
-
-### ✅ Required Software
-
-- [.NET 8 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
-- [PostgreSQL](https://www.postgresql.org/download/) (default connection: `localhost:5432`)
-- [Redis](https://redis.io/download/) (default connection: `localhost:6379`)
-- [RabbitMQ](https://www.rabbitmq.com/download.html) (default connection: `localhost:5672`)
-
-You can run Redis & RabbitMQ via Docker:
-
-```bash
-docker run -d --name redis -p 6379:6379 redis
-docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
-```
-
----
-
-### ⚙️ Configuration File
-
-Make sure to create or update `appsettings.json` in the root directory with the following:
-
-```json
-{
-  "ConnectionStrings": {
-    "Postgres": "Server=localhost;Port=5432;Database=url_shortener;User Id=postgres;Password=yourpassword;"
-  },
-  "Redis": {
-    "ConnectionString": "localhost:6379"
-  },
-  "RabbitMQ": {
-    "Host": "localhost",
-    "Port": 5672,
-    "Username": "guest",
-    "Password": "guest",
-    "QueueName": "click-events"
-  },
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
-    }
-  },
-  "AllowedHosts": "*"
-}
-```
-
----
-
-## 📦 Running the Project
-
-```bash
-dotnet restore
-dotnet build -c Release
-dotnet run --project UrlShortener.Application
-```
-
-Visit Swagger UI at:
-📎 [http://localhost:7083/swagger](http://localhost:7083/swagger)
-
----
-
-## 📈 Metrics
-
-- ✅ Built-in metrics middleware exposes:
-
-  - Request counts
-  - Error rates
-  - Cache hits/misses
-
-- 🛠️ Future: expose via `/metrics` endpoint (Prometheus format)
-
----
-
-## 🩺 Health Checks
-
-Health checks are available at:
-📎 [http://localhost:7083/health](http://localhost:7083/health)
-
-Includes:
-
-- ✅ PostgreSQL
-- ✅ Redis
-- ✅ RabbitMQ
-
 ---
 
 ## 🧪 Testing
-
-Run performance test (1000 requests, parallel):
-
-```bash
-cd UrlShortenerBenchmark
-dotnet run -- http://localhost:7083/{code} 1000
-```
 
 Run unit tests:
 
@@ -174,35 +101,62 @@ Run unit tests:
 dotnet test
 ```
 
----
-
-## 🧩 Architecture Diagram
-
-### 🔗 View Online (via PlantUML)
-
-You can view the architecture diagram rendered live here:
-👉 [View Architecture Diagram](https://www.plantuml.com/plantuml/png/TLBDKjim4BxhAROvjE40lVVG0LmWcS4qmVHKUb3aRQA9BBchDPaCmxjtxMg8VwOtQRyVxUhRoyYQkAcS-i0xh11gfwrNSMzzhKbNO49L1u-U2puw14B3scyTzYYrDdkznJ51fJhCCcV500fRuWnU5S3FQmg7YFGBT8HqLcyznTLg2VVwY0Jpgs9ryN3p15aWFElafvvWzeDS5ZnJS0vfrjgThXDcWVHY3NQqqtL8oqA9T-YHD0Vg2n8mP1UiEVPPNM4mojB_9XsP6iCDfVbBpNgZew2h47bBMAplE_ctww7_my9kaBncXFcom1XjyBVQSA3ZMITuM8ZWJuEDU3tgpSPolkw0V3rqUiJIHZ79jDbXwlYVHOiCMxwMmvP2uqj8p3ZvUCdKxDVjm_BXiQcGdlry8TDWEN1Fw33UegdhG0mV8G_USY3hjvCNScIo9kQsB1qUDE5iY2zGEzvbEpJxE6ljFy6j2mULzWdEpx_sbW6-mEBfQGLtiagVNqqeyUtPhxuNSekxG8nUzSYYxM_8wTWXtO-9uHtoZKYEL_7epRprF1jH9L3XtMhdDZ8xS6WBynUh9RW9DssO2D828dWyGEixfkPhOHKe0NKvmCqBUlvVcqM_JQL4A-XxC4BeUxoNtxjVUaDO2PPuMMY4D_wjRl7RMGEbyqgYbb1w4Qj9f71nCGffwHd9OCsnoqlrKnPsszEubYQTblErkaHVDfNx2m00)
-(Rendered via PlantUML Online Server)
-
----
-
-### 🖼️ Local Diagram (Optional)
-
-If you cloned this repository and generated a PNG locally (e.g. `Docs/architecture.png`), you can view it below:
-
-```markdown
-![Architecture Diagram](docs/architecture.png)
-```
-
-To generate the diagram locally, run:
+Run performance test (e.g. 1000 concurrent GETs):
 
 ```bash
-plantuml architecture.puml -o docs/
+cd UrlShortenerBenchmark
+dotnet run -- http://localhost:5000/{code} 1000
 ```
+
+---
+
+## 📈 Observability & Monitoring
+
+- ✅ Custom metrics middleware (requests, cache hits, etc.)
+- ✅ Health checks: `/health`
+- 🧭 Tracing & structured logging ready to be plugged in
+- 🛠️ `/metrics` endpoint can be added for Prometheus scraping
+
+---
+
+## 🧩 Architecture Overview
+
+### 🎯 Components
+
+- **API Service** – ASP.NET Core Web API
+- **Redis** – Fast cache for GETs by short code
+- **RabbitMQ** – Queue for async click tracking
+- **Worker** – Background consumer updates DB with counts
+- **Migrations** – Run via FluentMigrator on app start
+
+### 🖼️ Diagram
+
+You can view the architecture diagram here:
+
+👉 [View Live Diagram (PlantUML)](https://www.plantuml.com/plantuml/png/TLBDKjim4BxhAROvjE40lVVG0LmWcS4qmVHKUb3aRQA9BBchDPaCmxjtxMg8VwOtQRyVxUhRoyYQkAcS-i0xh11gfwrNSMzzhKbNO49L1u-U2puw14B3scyTzYYrDdkznJ51fJhCCcV500fRuWnU5S3FQmg7YFGBT8HqLcyznTLg2VVwY0Jpgs9ryN3p15aWFElafvvWzeDS5ZnJS0vfrjgThXDcWVHY3NQqqtL8oqA9T-YHD0Vg2n8mP1UiEVPPNM4mojB_9XsP6iCDfVbBpNgZew2h47bBMAplE_ctww7_my9kaBncXFcom1XjyBVQSA3ZMITuM8ZWJuEDU3tgpSPolkw0V3rqUiJIHZ79jDbXwlYVHOiCMxwMmvP2uqj8p3ZvUCdKxDVjm_BXiQcGdlry8TDWEN1Fw33UegdhG0mV8G_USY3hjvCNScIo9kQsB1qUDE5iY2zGEzvbEpJxE6ljFy6j2mULzWdEpx_sbW6-mEBfQGLtiagVNqqeyUtPhxuNSekxG8nUzSYYxM_8wTWXtO-9uHtoZKYEL_7epRprF1jH9L3XtMhdDZ8xS6WBynUh9RW9DssO2D828dWyGEixfkPhOHKe0NKvmCqBUlvVcqM_JQL4A-XxC4BeUxoNtxjVUaDO2PPuMMY4D_wjRl7RMGEbyqgYbb1w4Qj9f71nCGffwHd9OCsnoqlrKnPsszEubYQTblErkaHVDfNx2m00)
+
 ---
 
 ## 🙌 Credits
 
-Crafted by Idan
-Feedback and PRs welcome!
-````
+Built with ❤️ by **Idan**  
+Feel free to open issues or PRs!
+
+---
+
+## 📁 Repository Structure
+
+```text
+.
+├── UrlShortener.Application      # ASP.NET Core Web App
+├── UrlShortener.Domain           # Entities & interfaces
+├── UrlShortener.Infrastructure   # NHibernate, Redis, RabbitMQ
+├── UrlShortener.Migrations       # FluentMigrator project
+├── UrlShortenerBenchmark         # Performance benchmarking tool
+├── docker-compose.yml            # Base Docker config
+├── docker-compose.override.yml   # Adds migration runner
+├── Dockerfile                    # Web application image
+├── Dockerfile.migrations         # Migrations runner
+├── start.sh                      # Startup script with health checks
+└── .env                          # Configuration for containers
+```

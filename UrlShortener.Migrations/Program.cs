@@ -1,14 +1,19 @@
 ﻿using FluentMigrator.Runner;
 using Microsoft.Extensions.DependencyInjection;
 using System;
+using Microsoft.Extensions.Configuration;
+using System.IO;
 
-var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres");
+var configPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SharedConfig", "appsettings.json"));
 
+var configuration = new ConfigurationBuilder()
+    .AddJsonFile(configPath, optional: false)
+    .AddEnvironmentVariables()
+    .Build();
+
+var connectionString = configuration.GetConnectionString("Postgres");
 if (string.IsNullOrWhiteSpace(connectionString))
-{
-    Console.WriteLine("Missing environment variable: ConnectionStrings__Postgres");
-    return;
-}
+    throw new InvalidOperationException("❌ Missing Postgres connection string");
 
 var serviceProvider = new ServiceCollection()
     .AddFluentMigratorCore()

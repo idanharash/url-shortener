@@ -9,19 +9,21 @@ using UrlShortener.Model.QueueProducer;
 using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
 
-ThreadPool.SetMinThreads(100, 100);
-
 var builder = WebApplication.CreateBuilder(args);
+var sharedConfigPath = Path.GetFullPath(Path.Combine("..", "SharedConfig", "appsettings.json"));
+builder.Configuration
+    .AddJsonFile(sharedConfigPath, optional: false, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
-var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres");
-var redisConnectionString = Environment.GetEnvironmentVariable("Redis__ConnectionString");
-
+var connectionString = builder.Configuration["ConnectionStrings:Postgres"];
+var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
 if (string.IsNullOrWhiteSpace(connectionString))
-    throw new InvalidOperationException("Missing Postgres connection string (ConnectionStrings__Postgres)");
+    throw new InvalidOperationException("❌ Missing Postgres connection string");
 
 if (string.IsNullOrWhiteSpace(redisConnectionString))
-    throw new InvalidOperationException("Missing Redis connection string (Redis__ConnectionString)");
+    throw new InvalidOperationException("❌ Missing Redis connection string");
 
+// Redis
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     ConnectionMultiplexer.Connect(new ConfigurationOptions
     {
@@ -30,13 +32,12 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
         AbortOnConnectFail = false
     }));
 
+// NHibernate
 var sessionFactory = NHibernateHelper.CreateSessionFactory(connectionString!);
 builder.Services.AddSingleton(sessionFactory);
 
+// RabbitMQ
 builder.Services.Configure<RabbitMqSettings>(builder.Configuration.GetSection("RabbitMQ"));
-
-builder.Services.AddHealthChecks();
-
 builder.Services.AddSingleton<IClickQueueProducer>(sp =>
 {
     try
@@ -51,18 +52,21 @@ builder.Services.AddSingleton<IClickQueueProducer>(sp =>
     }
 });
 
+// Application Services
 builder.Services.AddScoped<IUrlRepository, UrlRepository>();
 builder.Services.AddScoped<IUrlService, UrlService>();
 builder.Services.AddScoped<ICodeGeneratorService, CodeGeneratorService>();
 builder.Services.AddScoped<IStatsService, StatsService>();
 builder.Services.AddScoped<IClickHandlerService, ClickHandlerService>();
 builder.Services.AddSingleton<ICacheService, CacheService>();
-
 builder.Services.AddHostedService<ClickQueueConsumer>();
 
+// Observability & Controllers
+builder.Services.AddHealthChecks();
 builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 
+// Resilience
 builder.Services.AddResiliencePipeline("db-pipeline", pipelineBuilder =>
 {
     pipelineBuilder
@@ -84,6 +88,7 @@ builder.Services.AddResiliencePipeline("db-pipeline", pipelineBuilder =>
 
 var app = builder.Build();
 
+// Middleware
 app.UseMiddleware<MetricsMiddleware>();
 
 if (app.Environment.IsDevelopment())
@@ -93,7 +98,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/health", () => Results.Ok("Healthy"));
-
 app.MapGet("/metrics", () =>
 {
     var (requests, errors) = MetricsMiddleware.GetMetrics();
@@ -105,7 +109,6 @@ app.MapGet("/metrics", () =>
         CacheService.CacheMisses
     });
 });
-
 app.MapControllers();
 
 app.Run();

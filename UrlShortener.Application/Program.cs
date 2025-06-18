@@ -1,15 +1,32 @@
 ﻿using Microsoft.Extensions.Options;
-using Polly;
-using Polly.CircuitBreaker;
-using Polly.Retry;
 using StackExchange.Redis;
-using UrlShortener.Application;
 using UrlShortener.BL;
 using UrlShortener.Model.QueueProducer;
 using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
+using Serilog;
+using Serilog.Enrichers.Span;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using Prometheus;
+using Polly;
+using Polly.Retry;
+using Polly.CircuitBreaker;
+using UrlShortener.Infrastructure;
+using UrlShortener.Infrastructure.Messaging;
+using UrlShortener.Infrastructure.Caching;
+
+Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
+    .Enrich.WithSpan()
+    .Enrich.WithEnvironmentName()
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} | TraceId={TraceId} SpanId={SpanId}{NewLine}{Exception}")
+    .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog();
+
 var sharedConfigPath = Path.GetFullPath(Path.Combine("..", "SharedConfig", "appsettings.json"));
 builder.Configuration
     .AddJsonFile(sharedConfigPath, optional: false, reloadOnChange: true)
@@ -86,6 +103,21 @@ builder.Services.AddResiliencePipeline("db-pipeline", pipelineBuilder =>
         });
 });
 
+builder.Services.AddOpenTelemetry()
+    .WithTracing(b =>
+    {
+        b.SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(builder.Configuration["OpenTelemetry:Tracing:ServiceName"] ?? "UrlShortener"));
+        b.AddAspNetCoreInstrumentation();
+        b.AddHttpClientInstrumentation();
+        b.AddSource("UrlShortener.Messaging");
+        b.AddSource("UrlShortener.Database");
+        b.AddJaegerExporter(opt =>
+        {
+            opt.AgentHost = builder.Configuration["OpenTelemetry:Tracing:Jaeger:AgentHost"] ?? "localhost"; ;
+            opt.AgentPort = int.TryParse(builder.Configuration["OpenTelemetry:Tracing:Jaeger:AgentPort"], out var port) ? port : 6831;
+        });
+    });
+
 var app = builder.Build();
 
 // Middleware
@@ -96,6 +128,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+
+app.UseHttpMetrics();
+app.UseRouting();
+app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok("Healthy"));
 app.MapGet("/metrics", () =>
@@ -109,6 +146,9 @@ app.MapGet("/metrics", () =>
         CacheService.CacheMisses
     });
 });
+
+app.MapMetrics();
 app.MapControllers();
+
 
 app.Run();

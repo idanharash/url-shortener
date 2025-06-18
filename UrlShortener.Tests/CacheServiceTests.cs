@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using Moq;
 using StackExchange.Redis;
-using UrlShortener.BL;
+using UrlShortener.Infrastructure.Caching;
 using UrlShortener.Model;
 
 namespace UrlShortener.Tests

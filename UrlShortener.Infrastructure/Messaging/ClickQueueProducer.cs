@@ -1,10 +1,9 @@
 ﻿using RabbitMQ.Client;
 using System.Text;
 using System.Text.Json;
-using UrlShortener.Application;
 using UrlShortener.Model.QueueProducer;
 
-namespace UrlShortener.BL
+namespace UrlShortener.Infrastructure.Messaging
 {
     public class ClickQueueProducer : IClickQueueProducer
     {

@@ -3,7 +3,7 @@ using System.Text.Json;
 using StackExchange.Redis;
 using UrlShortener.Model;
 
-namespace UrlShortener.BL
+namespace UrlShortener.Infrastructure.Caching
 {
     public class CacheService : ICacheService
     {

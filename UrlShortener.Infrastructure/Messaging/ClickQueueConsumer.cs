@@ -1,15 +1,14 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Polly;
-using Polly.CircuitBreaker;
-using Polly.Retry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Text;
 using System.Text.Json;
-using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
 
-namespace UrlShortener.Application;
+namespace UrlShortener.Infrastructure.Messaging;
 
 public class ClickQueueConsumer : BackgroundService
 {

@@ -1,4 +1,4 @@
-﻿namespace UrlShortener.Application
+﻿namespace UrlShortener.Infrastructure.Messaging
 {
     public class RabbitMqSettings
     {

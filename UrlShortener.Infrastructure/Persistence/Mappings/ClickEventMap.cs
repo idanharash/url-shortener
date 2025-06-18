@@ -1,7 +1,7 @@
 ﻿using FluentNHibernate.Mapping;
 using UrlShortener.Model;
 
-namespace UrlShortener.Repository
+namespace UrlShortener.Infrastructure.Persistence.Mappings
 {
     public class ClickEventMap : ClassMap<ClickEvent>
     {

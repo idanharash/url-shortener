@@ -1,7 +1,7 @@
 ﻿using FluentNHibernate.Cfg.Db;
 using FluentNHibernate.Cfg;
 using NHibernate;
-using UrlShortener.Repository;
+using UrlShortener.Infrastructure.Persistence.Mappings;
 
 public static class NHibernateHelper
 {

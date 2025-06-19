@@ -26,6 +26,7 @@ builder.Services.AddResiliencePolicies();
 builder.Services.AddHealthChecks();
 builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
+builder.Services.AddTelemetry(builder.Configuration);
 
 var app = builder.Build();
 

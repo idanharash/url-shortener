@@ -6,6 +6,7 @@ using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
 using UrlShortener.BL;
 using Prometheus;
+using UrlShortener.Model.Observability;
 
 namespace UrlShortener.Infrastructure.Extensions;
 
@@ -19,6 +20,7 @@ public static class StartupExtensions
         services.AddScoped<IStatsService, StatsService>();
         services.AddScoped<IClickHandlerService, ClickHandlerService>();
         services.AddSingleton<ICacheService, CacheService>();
+        services.AddSingleton<IAppTracer, AppTracer>();
     }
 
     public static void AddResiliencePolicies(this IServiceCollection services)

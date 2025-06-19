@@ -1,14 +1,16 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using UrlShortener.Application.Dto;
+using UrlShortener.Model.Observability;
 using UrlShortener.Model.Service;
 
 namespace UrlShortener.Application.Controllers
 {
     [ApiController]
     [Route("api")]
-    public class UrlController(IUrlService urlService) : ControllerBase
+    public class UrlController(IUrlService urlService, IAppTracer tracer) : ControllerBase
     {
         private readonly IUrlService _service = urlService;
+        private readonly IAppTracer _tracer = tracer;
 
         [HttpPost("shorten")]
         public async Task<IActionResult> ShortenUrl([FromBody] UrlRequestDto request)
@@ -19,12 +21,17 @@ namespace UrlShortener.Application.Controllers
         [HttpGet("/{code}")]
         public async Task<IActionResult> RedirectToOriginal(string code)
         {
-            var orginal =  await _service.GetOriginalUrl(code);
-            if (orginal == null)
-                return NotFound();
+            return await _tracer.TraceAsync<IActionResult>("RedirectToOriginal", "App", async activity =>
+            {
+                activity?.SetTag("url.code", code);
 
-            return RedirectPermanent(orginal);
+                var original = await _service.GetOriginalUrl(code);
+                return original == null
+                    ? new NotFoundResult()
+                    : new RedirectResult(original, permanent: true);
+            });
         }
+
     }
 
 }

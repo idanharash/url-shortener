@@ -1,6 +1,7 @@
 using Moq;
 using UrlShortener.BL;
 using UrlShortener.Model;
+using UrlShortener.Model.Observability;
 using UrlShortener.Model.QueueProducer;
 using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
@@ -11,12 +12,13 @@ public class UrlServiceTests
     private readonly Mock<ICodeGeneratorService> _codeGeneratorMock = new();
     private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IClickQueueProducer> _clickProducerMock = new();
+    private readonly Mock<IAppTracer> _tracer = new();
 
     private readonly UrlService _service;
 
     public UrlServiceTests()
     {
-        _service = new UrlService(_urlRepositoryMock.Object, _codeGeneratorMock.Object, _cacheServiceMock.Object, _clickProducerMock.Object);
+        _service = new UrlService(_urlRepositoryMock.Object, _codeGeneratorMock.Object, _cacheServiceMock.Object, _clickProducerMock.Object, _tracer.Object);
     }
 
     [Fact]

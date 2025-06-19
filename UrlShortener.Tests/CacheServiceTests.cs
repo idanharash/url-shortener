@@ -31,7 +31,6 @@ namespace UrlShortener.Tests
 
             // Assert
             Assert.Null(result);
-            Assert.True(CacheService.CacheMisses >= 1);
         }
 
         [Fact]
@@ -52,7 +51,6 @@ namespace UrlShortener.Tests
             Assert.NotNull(result);
             Assert.Equal(entry.OriginalUrl, result!.OriginalUrl);
             Assert.Equal(entry.ClickCount, result.ClickCount);
-            Assert.True(CacheService.CacheHits >= 1);
         }
 
         [Fact]

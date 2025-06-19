@@ -2,6 +2,9 @@
 using Prometheus;
 using Serilog.Enrichers.Span;
 using UrlShortener.Infrastructure.Extensions;
+using FluentValidation.AspNetCore;
+using FluentValidation;
+using UrlShortener.Application.Dto;
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
@@ -27,6 +30,8 @@ builder.Services.AddHealthChecks();
 builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 builder.Services.AddTelemetry(builder.Configuration);
+builder.Services.AddScoped<IValidator<UrlRequestDto>, UrlRequestDtoValidator>();
+builder.Services.AddFluentValidationAutoValidation();
 
 var app = builder.Build();
 

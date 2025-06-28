@@ -485,7 +485,6 @@ $RECYCLE.BIN/
 
 # === Docker ===
 .docker/
-docker-compose.override.yml
 *.log
 *.pid
 *.seed

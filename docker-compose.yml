@@ -41,9 +41,7 @@ services:
     restart: unless-stopped
     ports:
       - "5050:80"
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    env_file: .env
     depends_on:
       - db
 
@@ -57,12 +55,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
       ConnectionStrings__Postgres: "Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Redis__ConnectionString: ${REDIS_CONNECTION_STRING}
-      RabbitMQ__Host: ${RABBITMQ_HOST}
-      RabbitMQ__Port: "${RABBITMQ_PORT}"
-      RabbitMQ__Username: ${RABBITMQ_USERNAME}
-      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
-      RabbitMQ__QueueName: ${RABBITMQ_QUEUE_NAME}
-
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
 volumes:
   pgdata:

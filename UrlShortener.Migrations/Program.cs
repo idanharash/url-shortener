@@ -4,10 +4,10 @@ using System;
 using Microsoft.Extensions.Configuration;
 using System.IO;
 
-var configPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SharedConfig", "appsettings.json"));
+var sharedConfigPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SharedConfig", "appsettings.json"));
 
 var configuration = new ConfigurationBuilder()
-    .AddJsonFile(configPath, optional: false)
+    .AddJsonFile(sharedConfigPath, optional: true, reloadOnChange: true)
     .AddEnvironmentVariables()
     .Build();
 

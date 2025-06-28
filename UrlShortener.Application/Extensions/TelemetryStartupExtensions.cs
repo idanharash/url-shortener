@@ -21,6 +21,11 @@ public static class TelemetryStartupExtensions
                     .AddConsoleExporter(opt =>
                     {
                         opt.Targets = OpenTelemetry.Exporter.ConsoleExporterOutputTargets.Console;
+                    })
+                    .AddOtlpExporter(otlpOptions =>
+                    {
+                      var endpoint = config["OpenTelemetry:Otlp:Endpoint"];
+                      otlpOptions.Endpoint = new Uri(endpoint ?? "http://localhost:4317");
                     });
             });
     }

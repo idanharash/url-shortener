@@ -19,7 +19,7 @@ builder.Host.UseSerilog();
 
 var sharedConfigPath = Path.GetFullPath(Path.Combine("..", "SharedConfig", "appsettings.json"));
 builder.Configuration
-    .AddJsonFile(sharedConfigPath, optional: false, reloadOnChange: true)
+    .AddJsonFile(sharedConfigPath, optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
 
 builder.Services.AddPersistence(builder.Configuration);
@@ -45,6 +45,12 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpMetrics();
 app.UseRouting();
+app.UseWhen(context => context.Request.Method == HttpMethods.Post &&
+               context.Request.Path.StartsWithSegments("/api/shorten"),
+    appBuilder =>
+    {
+        appBuilder.UseMiddleware<RateLimitingMiddleware>();
+    });
 app.UseAuthorization();
 app.MapMonitoringEndpoints();
 app.MapControllers();

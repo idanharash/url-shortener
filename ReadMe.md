@@ -35,6 +35,18 @@ Includes full observability, health checks, async processing, and Docker-based d
 
 ---
 
+## 🔐 Security Considerations
+
+This project includes basic security measures to prevent abuse:
+
+- ✅ **Rate Limiting:** Enforced via Redis for `POST /api/shorten`, using a fixed-window strategy (20 requests per IP per minute).
+- ✅ **Environment-based config:** No hardcoded secrets in source code.
+- ❌ Authentication is not implemented (by design – open public demo).
+
+> 📌 Redirect and stats endpoints are not rate-limited to ensure high availability and user experience.
+
+---
+
 ## 🐳 Run with Docker (Recommended)
 
 The project includes a full Docker setup with:
@@ -46,7 +58,8 @@ The project includes a full Docker setup with:
 ### 📦 Start everything (including migrations)
 
 ```bash
-bash start.sh
+bash start-dependencies.sh   # Start PostgreSQL, Redis, RabbitMQ, Jaeger
+bash start-app.sh            # Run migrations and start the web server
 ```
 
 Once started:
@@ -57,6 +70,17 @@ Once started:
 - RabbitMQ UI: [http://localhost:15672](http://localhost:15672)  
   _(user/pass from `.env`)_
 - PgAdmin (optional): [http://localhost:5050](http://localhost:5050)
+
+### 📬 Example Usage
+
+```bash
+curl -X POST http://localhost:5000/api/shorten \
+     -H "Content-Type: application/json" \
+     -d '{ "url": "https://www.google.com" }'
+
+# Output:
+# { "code": "abc123", "shortUrl": "http://localhost:5000/abc123" }
+```
 
 To shut down:
 
@@ -110,7 +134,27 @@ dotnet run -- http://localhost:5000/{code} 1000
 
 ---
 
+## ⚡ Performance Results (Benchmark)
+
+| Scenario                 | Avg Latency | P95   | Notes                |
+| ------------------------ | ----------- | ----- | -------------------- |
+| GET /{code} (cache hit)  | 3 ms        | 6 ms  | Redis only           |
+| GET /{code} (cache miss) | 18 ms       | 29 ms | Includes DB fallback |
+| POST /api/shorten        | 11 ms       | 20 ms | Includes cache + DB  |
+
 ## 📈 Observability & Monitoring
+
+### Metrics (Prometheus-ready)
+
+- Total requests per endpoint/method
+- Latency per path (including P95)
+- Cache hit/miss tracking
+
+### Tracing (Jaeger-ready)
+
+- Full request path: Controller → Cache → DB → Queue
+- Distributed trace IDs across spans
+- Error tagging and structured logging
 
 - ✅ Custom metrics middleware (requests, cache hits, etc.)
 - ✅ Health checks: `/health`
@@ -133,7 +177,7 @@ dotnet run -- http://localhost:5000/{code} 1000
 
 You can view the architecture diagram here:
 
-👉 [View Live Diagram (PlantUML)](https://www.plantuml.com/plantuml/png/TLBDKjim4BxhAROvjE40lVVG0LmWcS4qmVHKUb3aRQA9BBchDPaCmxjtxMg8VwOtQRyVxUhRoyYQkAcS-i0xh11gfwrNSMzzhKbNO49L1u-U2puw14B3scyTzYYrDdkznJ51fJhCCcV500fRuWnU5S3FQmg7YFGBT8HqLcyznTLg2VVwY0Jpgs9ryN3p15aWFElafvvWzeDS5ZnJS0vfrjgThXDcWVHY3NQqqtL8oqA9T-YHD0Vg2n8mP1UiEVPPNM4mojB_9XsP6iCDfVbBpNgZew2h47bBMAplE_ctww7_my9kaBncXFcom1XjyBVQSA3ZMITuM8ZWJuEDU3tgpSPolkw0V3rqUiJIHZ79jDbXwlYVHOiCMxwMmvP2uqj8p3ZvUCdKxDVjm_BXiQcGdlry8TDWEN1Fw33UegdhG0mV8G_USY3hjvCNScIo9kQsB1qUDE5iY2zGEzvbEpJxE6ljFy6j2mULzWdEpx_sbW6-mEBfQGLtiagVNqqeyUtPhxuNSekxG8nUzSYYxM_8wTWXtO-9uHtoZKYEL_7epRprF1jH9L3XtMhdDZ8xS6WBynUh9RW9DssO2D828dWyGEixfkPhOHKe0NKvmCqBUlvVcqM_JQL4A-XxC4BeUxoNtxjVUaDO2PPuMMY4D_wjRl7RMGEbyqgYbb1w4Qj9f71nCGffwHd9OCsnoqlrKnPsszEubYQTblErkaHVDfNx2m00)
+👉 [View Live Diagram (PlantUML)](https://www.plantuml.com/plantuml/png/PLJ1RjD04BtxAuOS895e8mGI4WVKrasQGD8wSH07uB2n1sSLUzVChfj65V_EUBF5TdpRp7lpPiRp9bV62h9LaGUlx0uBX38NKWLcBrKfI1IGwABK2fMDxJ5784oiK5cEBKefaht8y9mG-3WCmboo0CGonG4y1m0_RaWV3D8l40RyE_ZRohYEvh0GHoGONiVHvVra0w4c7BdqfYSOVACyrCgIpdEaGItN_EmnOwH7cQ2ZDJ-xj52dU8SAILXDxGGFTDcn5TQqMIxG6MMkVfCmbgh4LkJdJuKLMs4OZRIn6M6yMhZqsvkk_lrCRf6Ki0Z3UOp6IAsc8h6QZYENS3_ZX3yLLgor5jkjjCkL0vQhhj8QKsbO91J93dt79mc7T5fUoZJDyI1ykpsPjR2ua8MqKcKDzwSQJkKJfl1TgbGVe4I2UUHhl6ISxVc67ndfIgNWUpAzakoUPB-gH-JLcgf0uaepRIocdJaysYqGLsMfoS9hM6ebhIPkkLTXXYAtkt27oTuCkb14ka2xmyfmKPEGAD70c4Ca4tEgsr2wgG-RHGIJfxgyQ_cXHBN17Ela8pXFnxTVJnerjxwBBm8p91Yx08IrZHEhJtVYC3VT6_0NDStr8V3t0nSNdzlV6Jx1RBE987g8Dp0MfHoRNTsA2jeaJcfVZ1VhnXkjkmbBFISwHUwY1JExVL3Dqo7EConnXtR2ASThSrJ9i5OPdL7P_yoRYZpVyWB1wZemV9I2VTxZ-eFa17-l20eFKEkUKvShPiMeKd1cWiaZAXi477P2tZZCQSCluQQnkKe82yOyBsJZsjw7S7y1zHYQ_3iI6VBMMXOCsfQ3oykwG2_cBxCNvjCE6jFrLnKxc_vtALTsle2NasqReBEWs1B3pPJZshwINEzTzpRUTeBTB-1GbclemxWKoho5fR-Rm36OwatDP1V9rb7ePM7uuVsxZwFW2bLQ5Va_)
 
 ---
 

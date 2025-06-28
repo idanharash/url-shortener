@@ -9,4 +9,5 @@ RUN dotnet publish UrlShortener.Application/UrlShortener.Application.csproj -c R
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app .
+EXPOSE 80
 ENTRYPOINT ["dotnet", "UrlShortener.Application.dll"]

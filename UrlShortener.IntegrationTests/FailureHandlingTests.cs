@@ -27,7 +27,8 @@ public sealed class FailureHandlingTests(UrlShortenerFixture fixture)
                 BacklogPolicy = BacklogPolicy.FailFast
             }));
         });
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var client = UrlShortenerFixture.WithApiKey(
+            factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }));
 
         var created = await client.ShortenAsync("https://example.com/no-redis");
         using var redirect = await client.GetAsync($"/{created.Code}");

@@ -14,6 +14,7 @@ using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
 using UrlShortener.Application.Controllers;
+using UrlShortener.Application.Security;
 using UrlShortener.Infrastructure.Messaging;
 using UrlShortener.Migrations.Migrations;
 using UrlShortener.Worker;
@@ -35,6 +36,7 @@ public sealed class IntegrationTestsDefinition : ICollectionFixture<UrlShortener
 public sealed class UrlShortenerFixture : IAsyncLifetime
 {
     public const string QueueName = "click-events";
+    public const string ApiKey = "integration-test-key-0123456789abcdef";
     private const string RabbitMqUser = "test";
     private const string RabbitMqPassword = "test";
     private const ushort RabbitMqPort = 5672;
@@ -77,6 +79,7 @@ public sealed class UrlShortenerFixture : IAsyncLifetime
         SetSetting("RabbitMQ__Password", RabbitMqPassword);
         SetSetting("RabbitMQ__QueueName", QueueName);
         SetSetting("App__PublicBaseUrl", "http://localhost");
+        SetSetting("Auth__ApiKeys__0", ApiKey);
         SetSetting("RateLimiting__PermitLimit", "100000"); // the tests create many links quickly
         SetSetting("Worker__MetricsPort", FreeTcpPort().ToString(CultureInfo.InvariantCulture));
 
@@ -101,8 +104,18 @@ public sealed class UrlShortenerFixture : IAsyncLifetime
         await Task.WhenAll(_postgres.DisposeAsync().AsTask(), _redis.DisposeAsync().AsTask(), _rabbitMq.DisposeAsync().AsTask());
     }
 
-    public HttpClient CreateClient() =>
+    /// <summary>A client that sends the API key, as a real API consumer would.</summary>
+    public HttpClient CreateClient() => WithApiKey(CreateAnonymousClient());
+
+    /// <summary>A client without the API key, e.g. a browser following a short link.</summary>
+    public HttpClient CreateAnonymousClient() =>
         Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+    public static HttpClient WithApiKey(HttpClient client)
+    {
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.HeaderName, ApiKey);
+        return client;
+    }
 
     public IConnection ConnectToRabbitMq() => new ConnectionFactory
     {

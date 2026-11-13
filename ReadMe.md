@@ -22,11 +22,12 @@ cd url-shortener
 cp .env.example .env              # Windows cmd: copy .env.example .env
 ```
 
-**2. Set both passwords in `.env`** (required). They are empty on purpose so no password is committed; choose your own values, `.env` is git-ignored:
+**2. Set the two passwords and the API key in `.env`** (required). They are empty on purpose so no secret is committed; choose your own values, `.env` is git-ignored:
 
 ```dotenv
 POSTGRES_PASSWORD=<choose-a-password>
 RABBITMQ_PASSWORD=<choose-another-password>
+API_KEY=<at-least-32-characters: openssl rand -hex 32, or on Windows see the full guide>
 ```
 
 **3. Run and check**
@@ -39,8 +40,8 @@ curl http://localhost:5000/health # {"status":"Healthy",...} once everything is 
 **4. Try it**
 
 ```bash
-curl -X POST http://localhost:5000/api/shorten -H "Content-Type: application/json" -d '{"url":"https://example.com"}'
-curl -i http://localhost:5000/<code>          # 302 to https://example.com
+curl -X POST http://localhost:5000/api/shorten -H "X-Api-Key: <API_KEY>" -H "Content-Type: application/json" -d '{"url":"https://example.com"}'
+curl -i http://localhost:5000/<code>          # 302 to https://example.com (public, no key needed)
 curl http://localhost:5000/api/stats/<code>   # {"createdAt":"…Z","clickCount":1} (counted asynchronously: allow a second)
 docker compose down                           # stop (add -v to delete the data)
 ```
@@ -117,6 +118,8 @@ The consumer requeues messages while the database is unavailable (with a delay, 
 
 **Rate limiting in Redis.** A fixed window per client IP, implemented as one atomic Lua script (`INCR` and `PEXPIRE` together, so a crash can't leave a key without expiry). It's stored in Redis rather than in memory so the limit holds across several instances. It fails open: blocking all users because the limiter's store is down would be worse than briefly allowing extra requests.
 
+**API keys for creating links; redirects and stats stay public.** Link creation is done by machine clients, for which an API key in the `X-Api-Key` header is the standard and simplest fit. It is implemented as a regular ASP.NET Core authentication scheme, so the endpoint only declares `[Authorize]`. Several keys can be valid at once (rotation without downtime), keys must be at least 32 characters, comparison is constant-time over SHA-256 hashes, and the app refuses to start without a key, so the endpoint can't end up unprotected by accident. Authentication runs after the rate limiter, so key guessing is rate limited too. JWT with an identity provider becomes the right choice once there are user accounts ("my links"); because the auth is a pluggable scheme, that is a registration change, not a rewrite.
+
 **NHibernate with targeted raw SQL.** Mappings handle reads; the two operations that must be atomic (insert-if-absent and increment) are single SQL statements. For a model this small, Dapper or EF Core would be equally valid choices.
 
 ---
@@ -125,7 +128,7 @@ The consumer requeues messages while the database is unavailable (with a delay, 
 
 | Endpoint | Success | Errors |
 |---|---|---|
-| `POST /api/shorten` `{ "url": "…" }` | 200 `{ code, shortUrl }` | 400 invalid URL, 429 rate limited (with `Retry-After`) |
+| `POST /api/shorten` `{ "url": "…" }`, header `X-Api-Key` | 200 `{ code, shortUrl }` | 400 invalid URL, 401 missing or wrong API key, 429 rate limited (with `Retry-After`) |
 | `GET /{code}` | 302 to the original URL | 404 unknown or malformed code |
 | `GET /api/stats/{code}` | 200 `{ createdAt, clickCount }` | 404 unknown or malformed code |
 | `GET /health` | 200 Healthy/Degraded | 503 Unhealthy (PostgreSQL down) |
@@ -137,7 +140,7 @@ Accepted URLs: absolute `http`/`https`, at most 2048 characters, not pointing at
 
 ## Configuration
 
-All settings live in [`SharedConfig/appsettings.json`](SharedConfig/appsettings.json) and are validated at startup: a missing or invalid value stops the app with a message naming the setting (never its value). Passwords are not in the file; they come from `.env` in Docker or from `dotnet user-secrets` locally ([details](docs/getting-started.md#2-clone-and-configure)). Tunable behaviour: `App:PublicBaseUrl`, `RateLimiting:PermitLimit` / `Window`, `Cache:EntryTtl`, `Worker:MetricsPort`, and `OpenTelemetry:ConsoleExporter` (prints every span; debugging only, costs about 4× throughput).
+All settings live in [`SharedConfig/appsettings.json`](SharedConfig/appsettings.json) and are validated at startup: a missing or invalid value stops the app with a message naming the setting (never its value). Passwords and API keys are not in the file; they come from `.env` in Docker or from `dotnet user-secrets` locally ([details](docs/getting-started.md#2-clone-and-configure)). Tunable behaviour: `App:PublicBaseUrl`, `RateLimiting:PermitLimit` / `Window`, `Cache:EntryTtl`, `Worker:MetricsPort`, and `OpenTelemetry:ConsoleExporter` (prints every span; debugging only, costs about 4× throughput).
 
 ---
 
@@ -195,7 +198,7 @@ In rough priority order:
 1. **One database write per click.** Fine for moderate traffic; at high volume the consumer should aggregate clicks and write them in batches (e.g. per-day counters with one upsert per flush).
 2. **Rate limiting by remote IP.** Behind a reverse proxy every client shares the proxy's IP. Production needs `ForwardedHeaders` configured with the proxy's address. A fixed window also allows bursts at window edges; a sliding window or token bucket would smooth that.
 3. **Dead-lettered messages have no automated replay;** they're inspected and moved manually (RabbitMQ management UI or a shovel).
-4. **No authentication or abuse screening.** Anyone can create links, and target URLs aren't checked against malware or phishing lists.
+4. **API keys, not user accounts, and no abuse screening.** Keys identify trusted clients, not users; per-user features ("my links") would need JWT with an identity provider. Rate limits are per IP, not per key, and target URLs aren't checked against malware or phishing lists.
 5. **A few major package upgrades are deferred on purpose:** RabbitMQ.Client 7 (a fully async API, so the publisher and consumer need a rewrite), StackExchange.Redis 3, Npgsql 10 and Swashbuckle (or switching to .NET 10's built-in OpenAPI). Each is a breaking change that deserves its own tested change rather than a version bump; the current versions are supported and run on .NET 10.
 6. **Every request is traced** (`AlwaysOnSampler`). At higher traffic, switch to parent-based ratio sampling.
 

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UrlShortener.Application.Dto;
 using UrlShortener.Application.Settings;
@@ -9,6 +10,8 @@ namespace UrlShortener.Application.Controllers;
 [Route("api")]
 public class UrlController(IUrlService urlService, AppSettings settings) : ControllerBase
 {
+    // Creating links requires an API key; redirects and stats stay public.
+    [Authorize]
     [HttpPost("shorten")]
     public async Task<IActionResult> ShortenUrl([FromBody] UrlRequestDto request)
     {

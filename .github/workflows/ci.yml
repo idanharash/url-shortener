@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore UrlShortener.sln
+
+      - name: Build
+        run: dotnet build UrlShortener.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test UrlShortener.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/TestResults/*.trx"
+
+  docker-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build web image
+        run: docker build --file Dockerfile --tag url-shortener-web .
+
+      - name: Build worker image
+        run: docker build --file Dockerfile.worker --tag url-shortener-worker .
+
+      - name: Build migrations image
+        run: docker build --file Dockerfile.migrations --tag url-shortener-migrations .

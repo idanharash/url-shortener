@@ -1,8 +1,7 @@
-﻿namespace UrlShortener.Model.Service
+namespace UrlShortener.Model.Service;
+
+public interface IUrlService
 {
-    public interface IUrlService
-    {
-        Task<ShortenUrlResponse> CreateShortUrl(string baseUrl, string siteUrl);
-        Task<string?> GetOriginalUrl(string code);
-    }
+    Task<ShortenUrlResponse> CreateShortUrl(string baseUrl, string siteUrl);
+    Task<string?> GetOriginalUrl(string code);
 }

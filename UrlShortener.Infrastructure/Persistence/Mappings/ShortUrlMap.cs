@@ -1,17 +1,16 @@
-﻿using FluentNHibernate.Mapping;
+using FluentNHibernate.Mapping;
 using UrlShortener.Model;
 
-namespace UrlShortener.Infrastructure.Persistence.Mappings
+namespace UrlShortener.Infrastructure.Persistence.Mappings;
+
+public class ShortUrlMap : ClassMap<ShortUrl>
 {
-    public class ShortUrlMap : ClassMap<ShortUrl>
+    public ShortUrlMap()
     {
-        public ShortUrlMap()
-        {
-            Table("short_urls");
-            Id(x => x.Code).Column("code").GeneratedBy.Assigned();
-            Map(x => x.OriginalUrl).Column("original_url").Not.Nullable();
-            Map(x => x.CreatedAt).Column("created_at");
-            Map(x => x.ClickCount).Column("click_count");
-        }
+        Table("short_urls");
+        Id(x => x.Code).Column("code").GeneratedBy.Assigned();
+        Map(x => x.OriginalUrl).Column("original_url").Not.Nullable();
+        Map(x => x.CreatedAt).Column("created_at");
+        Map(x => x.ClickCount).Column("click_count");
     }
 }

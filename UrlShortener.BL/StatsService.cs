@@ -1,27 +1,23 @@
-﻿using UrlShortener.Model.Repository;
 using UrlShortener.Model;
+using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
 
-namespace UrlShortener.BL
-{
-    public class StatsService: IStatsService
-    {
-        private readonly IUrlRepository _urlRepository;
-        private readonly ICacheService _cacheService;
+namespace UrlShortener.BL;
 
-        public StatsService(IUrlRepository urlRepository, ICacheService cacheService)
-        {
-            _urlRepository = urlRepository;
-            _cacheService = cacheService;
-        }
-        public async Task<GetStatsByCodeResponse?> GetByCode(string code)
-        {
-            var cacheEntry = await _cacheService.GetEntryAsync(code);
-            if (cacheEntry != null) return new GetStatsByCodeResponse() { CreatedAt = cacheEntry.CreatedAt, ClickCount = cacheEntry.ClickCount };
-            var dbEntry = await _urlRepository.GetByCode(code);
-            if(dbEntry == null) return null;
-            await _cacheService.SetEntryAsync(code, new ShortUrlCacheEntry() { OriginalUrl = dbEntry.OriginalUrl, ClickCount = dbEntry.ClickCount, CreatedAt = dbEntry.CreatedAt });
-            return new GetStatsByCodeResponse() { CreatedAt = dbEntry.CreatedAt, ClickCount = dbEntry.ClickCount };
-        }
+/// <summary>
+/// Reads stats from the database, the single source of truth for click counts.
+/// Counts are eventually consistent: clicks still in the queue are not included yet.
+/// </summary>
+public class StatsService(IUrlRepository repository) : IStatsService
+{
+    public async Task<GetStatsByCodeResponse?> GetByCode(string code)
+    {
+        if (!CodeGeneratorService.IsValidFormat(code))
+            return null;
+
+        var entry = await repository.GetByCode(code);
+        return entry is null
+            ? null
+            : new GetStatsByCodeResponse { CreatedAt = entry.CreatedAt, ClickCount = entry.ClickCount };
     }
 }

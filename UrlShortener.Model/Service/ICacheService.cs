@@ -1,9 +1,11 @@
-﻿namespace UrlShortener.Model.Service
+﻿namespace UrlShortener.Model.Service;
+
+/// <summary>
+/// Caches the code → original URL mapping, which never changes once created.
+/// Implementations must not throw when the cache is unavailable: a failed read is a miss.
+/// </summary>
+public interface ICacheService
 {
-    public interface ICacheService
-    {
-        Task<ShortUrlCacheEntry?> GetEntryAsync(string code);
-        Task SetEntryAsync(string code, ShortUrlCacheEntry entry, TimeSpan? expiry = null);
-        Task<long?> IncrementClicksAsync(string code);
-    }
+    Task<string?> GetOriginalUrlAsync(string code);
+    Task SetOriginalUrlAsync(string code, string originalUrl);
 }

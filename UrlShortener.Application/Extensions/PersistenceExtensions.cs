@@ -1,35 +1,33 @@
-﻿using FluentNHibernate.Cfg;
+using FluentNHibernate.Cfg;
 using FluentNHibernate.Cfg.Db;
-using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using UrlShortener.Application.Settings;
+using UrlShortener.Infrastructure.Caching;
+using UrlShortener.Infrastructure.Persistence;
 
-namespace UrlShortener.Infrastructure.Extensions;
+namespace UrlShortener.Application.Extensions;
 
 public static class PersistenceExtensions
 {
     public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration config)
     {
-        // Redis Settings
-        services.Configure<RedisSettings>(config.GetSection("Redis"));
-
-        services.AddSingleton<IConnectionMultiplexer>(sp =>
+        var redis = services.AddValidatedSettings<RedisSettings>(config, RedisSettings.SectionName);
+        services.AddValidatedSettings<CacheSettings>(config, CacheSettings.SectionName);
+        services.AddSingleton<IConnectionMultiplexer>(_ =>
         {
-            var settings = sp.GetRequiredService<IOptions<RedisSettings>>().Value;
-            return ConnectionMultiplexer.Connect(new ConfigurationOptions
-            {
-                EndPoints = { settings.ConnectionString },
-                ConnectTimeout = 2000,
-                AbortOnConnectFail = false
-            });
+            var options = ConfigurationOptions.Parse(redis.ConnectionString);
+            options.AbortOnConnectFail = false; // start even if Redis is down; it reconnects in the background
+            options.ConnectTimeout = 2000;
+            options.AsyncTimeout = 1000;
+            // While disconnected, fail commands immediately instead of queueing them until the timeout:
+            // the cache falls back to the database, so waiting would only slow down redirects.
+            options.BacklogPolicy = BacklogPolicy.FailFast;
+            return ConnectionMultiplexer.Connect(options);
         });
 
-        // PostgreSQL via NHibernate
-        var connStr = config.GetConnectionString("Postgres")
-                     ?? throw new InvalidOperationException("Missing PostgreSQL connection string");
-
+        var postgres = services.AddValidatedSettings<PostgresSettings>(config, PostgresSettings.SectionName);
         var sessionFactory = Fluently.Configure()
-            .Database(PostgreSQLConfiguration.Standard.ConnectionString(connStr))
+            .Database(PostgreSQLConfiguration.Standard.ConnectionString(postgres.ToConnectionString()))
             .Mappings(m => m.FluentMappings.AddFromAssemblyOf<UrlRepository>())
             .BuildSessionFactory();
 

@@ -1,120 +1,168 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using System.Diagnostics;
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
-using Polly;
+using Microsoft.Extensions.Logging;
+using Polly.CircuitBreaker;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System.Text;
-using System.Text.Json;
+using UrlShortener.Infrastructure.Observability;
+using UrlShortener.Infrastructure.Persistence;
 using UrlShortener.Model.Service;
 
 namespace UrlShortener.Infrastructure.Messaging;
 
-public class ClickQueueConsumer : BackgroundService
+/// <summary>
+/// Consumes click events and stores them. Delivery is at-least-once: a message is acked only after the
+/// database update, so a crash in between can count a click twice. That is accepted for analytics
+/// (see README, "Design decisions").
+/// </summary>
+public sealed class ClickQueueConsumer(
+    IServiceScopeFactory scopeFactory,
+    RabbitMqSettings settings,
+    ILogger<ClickQueueConsumer> logger) : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly RabbitMqSettings _settings;
+    // Unacked messages the broker may push ahead; the async consumer still handles them one at a time.
+    private const ushort PrefetchCount = 50;
+    private const int ConnectRetrySeconds = 5;
+    private static readonly TimeSpan ConnectRetryDelay = TimeSpan.FromSeconds(ConnectRetrySeconds);
+    // While the database is down, requeued messages come straight back; this delay slows the loop down.
+    private static readonly TimeSpan TransientFailureDelay = TimeSpan.FromSeconds(5);
+
+    private readonly string _queue = settings.QueueName;
     private IConnection? _connection;
     private IModel? _channel;
-    private readonly Policy _resiliencePolicy;
 
-    public ClickQueueConsumer(IServiceScopeFactory scopeFactory, IOptions<RabbitMqSettings> options)
+    public bool IsConsuming => _channel is { IsOpen: true };
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _scopeFactory = scopeFactory;
-        _settings = options.Value;
+        await Task.Yield(); // connecting blocks; don't hold up application startup
 
-        // הגדרת פוליסת Polly עם Retry + Circuit Breaker
-        _resiliencePolicy = Policy
-            .Handle<Exception>()
-            .Retry(3, (ex, retryCount) =>
+        // Retry the first connection instead of crashing the host. After that, the client's automatic
+        // recovery reconnects and re-subscribes by itself.
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
             {
-                Console.WriteLine($"[RabbitMQ Retry] Attempt {retryCount}: {ex.Message}");
-            })
-            .Wrap(Policy
-                .Handle<Exception>()
-                .CircuitBreaker(2, TimeSpan.FromSeconds(15),
-                    onBreak: (ex, duration) =>
-                    {
-                        Console.WriteLine($"[Circuit Broken] {ex.Message} for {duration.TotalSeconds} seconds");
-                    },
-                    onReset: () => Console.WriteLine("[Circuit Reset] RabbitMQ connection restored")
-                )
-            );
+                StartConsuming();
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "RabbitMQ unavailable; retrying the consumer connection in {Delay}s", ConnectRetrySeconds);
+                CloseConnection();
+                await DelayUnlessStopping(ConnectRetryDelay, stoppingToken);
+            }
+        }
+
+        await DelayUnlessStopping(Timeout.InfiniteTimeSpan, stoppingToken);
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    private void StartConsuming()
     {
-        return Task.Run(() =>
+        _connection = ClickQueueTopology.CreateConnectionFactory(settings, automaticRecovery: true)
+            .CreateConnection("url-shortener-consumer");
+        var channel = _channel = _connection.CreateModel();
+        ClickQueueTopology.Declare(channel, _queue);
+        channel.BasicQos(prefetchSize: 0, prefetchCount: PrefetchCount, global: false);
+
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.Received += (_, delivery) => HandleDeliveryAsync(channel, delivery);
+        channel.BasicConsume(queue: _queue, autoAck: false, consumer: consumer);
+
+        if (logger.IsEnabled(LogLevel.Information))
+            logger.LogInformation("Consuming click events from {Queue}", _queue);
+    }
+
+    private async Task HandleDeliveryAsync(IModel channel, BasicDeliverEventArgs delivery)
+    {
+        using var activity = Telemetry.Messaging.StartActivity("click process", ActivityKind.Consumer);
+
+        var code = TryReadCode(delivery);
+        if (code is null)
         {
-            _resiliencePolicy.Execute(() =>
-            {
-                if (string.IsNullOrWhiteSpace(_settings.QueueName))
-                    throw new InvalidOperationException("RabbitMQ.QueueName is not set");
+            logger.LogError("Malformed click message (delivery {DeliveryTag}); moving it to the dead-letter queue", delivery.DeliveryTag);
+            DeadLetter(channel, delivery);
+            return;
+        }
 
-                var factory = new ConnectionFactory
-                {
-                    HostName = _settings.Host,
-                    Port = _settings.Port,
-                    UserName = _settings.Username,
-                    Password = _settings.Password
-                };
+        activity?.SetTag("url.code", code);
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<IClickHandlerService>().HandleClickAsync(code);
+        }
+        catch (Exception ex) when (IsTransient(ex))
+        {
+            // Database unavailable: keep the message and slow down until it recovers. Nothing is lost.
+            activity.MarkFailed(ex);
+            logger.LogWarning(ex, "Database unavailable while storing click for {Code}; requeueing", code);
+            await Task.Delay(TransientFailureDelay);
+            channel.BasicNack(delivery.DeliveryTag, multiple: false, requeue: true);
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Not something a retry fixes (a bug or bad data): park it instead of blocking the queue.
+            activity.MarkFailed(ex);
+            logger.LogError(ex, "Storing click for {Code} failed; moving it to the dead-letter queue", code);
+            DeadLetter(channel, delivery);
+            return;
+        }
 
-                _connection = factory.CreateConnection();
-                _channel = _connection.CreateModel();
+        channel.BasicAck(delivery.DeliveryTag, multiple: false);
+        MetricsRegistry.ClicksProcessed.Inc();
+    }
 
-                _channel.QueueDeclare(
-                    queue: _settings.QueueName,
-                    durable: true,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: null
-                );
+    private static string? TryReadCode(BasicDeliverEventArgs delivery)
+    {
+        try
+        {
+            var message = JsonSerializer.Deserialize<ClickMessage>(delivery.Body.Span);
+            return string.IsNullOrWhiteSpace(message?.Code) ? null : message.Code;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
-                var consumer = new EventingBasicConsumer(_channel);
-                consumer.Received += async (sender, ea) =>
-                {
-                    var body = ea.Body.ToArray();
-                    var json = Encoding.UTF8.GetString(body);
+    private static bool IsTransient(Exception ex) => ex is BrokenCircuitException || TransientDbErrors.IsTransient(ex);
 
-                    try
-                    {
-                        var data = JsonSerializer.Deserialize<ClickEvent>(json);
-                        if (!string.IsNullOrEmpty(data?.Code))
-                        {
-                            using var scope = _scopeFactory.CreateScope();
-                            var service = scope.ServiceProvider.GetRequiredService<IClickHandlerService>();
-                            await service.HandleClickAsync(data.Code);
-                        }
+    private static void DeadLetter(IModel channel, BasicDeliverEventArgs delivery)
+    {
+        // requeue: false routes the message to the dead-letter queue configured in ClickQueueTopology.
+        channel.BasicNack(delivery.DeliveryTag, multiple: false, requeue: false);
+        MetricsRegistry.ClicksDeadLettered.Inc();
+    }
 
-                        _channel.BasicAck(ea.DeliveryTag, multiple: false);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Message Error] {ex.Message}");
-                        // שים לב: אפשר לבצע Nack או Dead-letter כאן במידת הצורך
-                    }
-                };
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken);
+        CloseConnection();
+    }
 
-                _channel.BasicConsume(
-                    queue: _settings.QueueName,
-                    autoAck: false,
-                    consumer: consumer
-                );
+    private void CloseConnection()
+    {
+        try { _channel?.Close(); } catch (Exception ex) { logger.LogDebug(ex, "Ignoring error while closing the consumer channel"); }
+        try { _connection?.Close(); } catch (Exception ex) { logger.LogDebug(ex, "Ignoring error while closing the consumer connection"); }
 
-                Console.WriteLine("[RabbitMQ Consumer] Listening to queue...");
-            });
-        }, stoppingToken);
+        _channel?.Dispose();
+        _connection?.Dispose();
+        _channel = null;
+        _connection = null;
+    }
+
+    private static async Task DelayUnlessStopping(TimeSpan delay, CancellationToken stoppingToken)
+    {
+        try { await Task.Delay(delay, stoppingToken); }
+        catch (OperationCanceledException) { }
     }
 
     public override void Dispose()
     {
-        _channel?.Close();
-        _connection?.Close();
+        CloseConnection();
         base.Dispose();
-    }
-
-    private class ClickEvent
-    {
-        public string? Code { get; set; }
     }
 }

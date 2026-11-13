@@ -1,0 +1,15 @@
+<Project>
+  <!-- Shared by every project in the solution. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- .NET code analyzers with the latest "Recommended" rule set; rules that don't fit are tuned in .editorconfig. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- Apply the code-style rules from .editorconfig during build, not only in the IDE. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Zero-warning policy: analyzer findings, nullable issues and vulnerable packages fail the build. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

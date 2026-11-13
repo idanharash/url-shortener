@@ -1,37 +1,26 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using UrlShortener.Application.Dto;
-using UrlShortener.Model.Observability;
+using UrlShortener.Application.Settings;
 using UrlShortener.Model.Service;
 
-namespace UrlShortener.Application.Controllers
+namespace UrlShortener.Application.Controllers;
+
+[ApiController]
+[Route("api")]
+public class UrlController(IUrlService urlService, AppSettings settings) : ControllerBase
 {
-    [ApiController]
-    [Route("api")]
-    public class UrlController(IUrlService urlService, IAppTracer tracer) : ControllerBase
+    [HttpPost("shorten")]
+    public async Task<IActionResult> ShortenUrl([FromBody] UrlRequestDto request)
     {
-        private readonly IUrlService _service = urlService;
-        private readonly IAppTracer _tracer = tracer;
-
-        [HttpPost("shorten")]
-        public async Task<IActionResult> ShortenUrl([FromBody] UrlRequestDto request)
-        {
-            return Ok(await _service.CreateShortUrl($"{Request.Scheme}://{Request.Host}", request.Url));
-        }
-
-        [HttpGet("/{code}")]
-        public async Task<IActionResult> RedirectToOriginal(string code)
-        {
-            return await _tracer.TraceAsync<IActionResult>("RedirectToOriginal", "App", async activity =>
-            {
-                activity?.SetTag("url.code", code);
-
-                var original = await _service.GetOriginalUrl(code);
-                return original == null
-                    ? new NotFoundResult()
-                    : new RedirectResult(original, permanent: true);
-            });
-        }
-
+        return Ok(await urlService.CreateShortUrl(settings.PublicBaseUrl.TrimEnd('/'), request.Url));
     }
 
+    // 302, not 301: browsers cache permanent redirects, so repeat visits would never reach
+    // the service and would not be counted.
+    [HttpGet("/{code}")]
+    public async Task<IActionResult> RedirectToOriginal(string code)
+    {
+        var original = await urlService.GetOriginalUrl(code);
+        return original is null ? NotFound() : Redirect(original);
+    }
 }

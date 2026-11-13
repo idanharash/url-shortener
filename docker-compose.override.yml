@@ -1,16 +1,23 @@
-version: '3.8'
-
 services:
   migrate:
     build:
       context: .
       dockerfile: Dockerfile.migrations
     environment:
-      ConnectionStrings__Postgres: "Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Postgres__Host: db
+      Postgres__Database: ${POSTGRES_DB:-url_shortener}
+      Postgres__Username: ${POSTGRES_USER:-postgres}
+      Postgres__Password: ${POSTGRES_PASSWORD}
     depends_on:
-      - db
-    env_file: .env
-    command: ["dotnet", "UrlShortener.Migrations.dll"]
+      db:
+        condition: service_healthy
+
+  # Merged into the web service from docker-compose.yml: start it only after migrations succeed.
+  web:
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   jaeger:
     image: jaegertracing/all-in-one:1.51
     ports:

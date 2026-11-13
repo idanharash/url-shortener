@@ -1,19 +1,32 @@
-﻿using FluentMigrator.Runner;
-using Microsoft.Extensions.DependencyInjection;
-using System;
+using System.Globalization;
+using FluentMigrator.Runner;
 using Microsoft.Extensions.Configuration;
-using System.IO;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
-var sharedConfigPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SharedConfig", "appsettings.json"));
-
+// Same settings file as the web app (linked into the output folder),
+// overridden by user-secrets and environment variables.
 var configuration = new ConfigurationBuilder()
-    .AddJsonFile(sharedConfigPath, optional: true, reloadOnChange: true)
+    .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: false)
+    .AddUserSecrets(typeof(Program).Assembly, optional: true)
     .AddEnvironmentVariables()
     .Build();
 
-var connectionString = configuration.GetConnectionString("Postgres");
-if (string.IsNullOrWhiteSpace(connectionString))
-    throw new InvalidOperationException("❌ Missing Postgres connection string");
+var postgres = configuration.GetSection("Postgres");
+string[] requiredKeys = ["Host", "Port", "Database", "Username", "Password"];
+var missing = requiredKeys.Where(key => string.IsNullOrWhiteSpace(postgres[key])).ToList();
+if (missing.Count > 0)
+    throw new InvalidOperationException(
+        $"Missing configuration: {string.Join(", ", missing.Select(key => $"Postgres:{key}"))}");
+
+var connectionString = new NpgsqlConnectionStringBuilder
+{
+    Host = postgres["Host"],
+    Port = int.Parse(postgres["Port"]!, CultureInfo.InvariantCulture),
+    Database = postgres["Database"],
+    Username = postgres["Username"],
+    Password = postgres["Password"]
+}.ConnectionString;
 
 var serviceProvider = new ServiceCollection()
     .AddFluentMigratorCore()
@@ -25,6 +38,4 @@ var serviceProvider = new ServiceCollection()
     .BuildServiceProvider();
 
 using var scope = serviceProvider.CreateScope();
-var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
-
-runner.MigrateUp();
+scope.ServiceProvider.GetRequiredService<IMigrationRunner>().MigrateUp();

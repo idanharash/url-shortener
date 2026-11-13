@@ -3,7 +3,7 @@ using UrlShortener.Application.Dto;
 using UrlShortener.Application.Settings;
 using UrlShortener.Application.Validators;
 
-namespace UrlShortener.Tests;
+namespace UrlShortener.UnitTests;
 
 public class UrlRequestDtoValidatorTests
 {

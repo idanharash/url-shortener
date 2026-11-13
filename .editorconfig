@@ -24,6 +24,6 @@ dotnet_diagnostic.CA1848.severity = none
 # This is an application, not a library: public types are not a published API surface.
 dotnet_diagnostic.CA1515.severity = none
 
-[UrlShortener.Tests/**.cs]
+[{UrlShortener.UnitTests,UrlShortener.IntegrationTests}/**.cs]
 # Test names use underscores to separate the scenario from the expected result.
 dotnet_diagnostic.CA1707.severity = none

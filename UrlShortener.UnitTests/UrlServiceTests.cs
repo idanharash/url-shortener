@@ -5,7 +5,7 @@ using UrlShortener.Model.QueueProducer;
 using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
 
-namespace UrlShortener.Tests;
+namespace UrlShortener.UnitTests;
 
 public class UrlServiceTests
 {

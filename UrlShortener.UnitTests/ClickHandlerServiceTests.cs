@@ -2,7 +2,7 @@ using Moq;
 using UrlShortener.BL;
 using UrlShortener.Model.Repository;
 
-namespace UrlShortener.Tests;
+namespace UrlShortener.UnitTests;
 
 public class ClickHandlerServiceTests
 {

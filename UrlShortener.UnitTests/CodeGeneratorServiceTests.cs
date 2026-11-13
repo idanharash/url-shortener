@@ -1,6 +1,6 @@
 using UrlShortener.BL;
 
-namespace UrlShortener.Tests;
+namespace UrlShortener.UnitTests;
 
 public class CodeGeneratorServiceTests
 {

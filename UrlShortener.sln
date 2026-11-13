@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.12.35707.178
@@ -11,11 +11,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortener.Model", "UrlSh
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortenerBenchmark", "UrlShortenerBenchmark\UrlShortenerBenchmark.csproj", "{1D0F9DC0-EFA6-4FFD-829F-40AA8D9C33F2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortener.Tests", "UrlShortener.Tests\UrlShortener.Tests.csproj", "{25545FA5-E2EF-4DAD-A9F3-96DD90AD69B8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortener.UnitTests", "UrlShortener.UnitTests\UrlShortener.UnitTests.csproj", "{25545FA5-E2EF-4DAD-A9F3-96DD90AD69B8}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortener.Migrations", "UrlShortener.Migrations\UrlShortener.Migrations.csproj", "{001CA2E0-1583-4CD6-9D7B-71EA1819F376}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortener.Infrastructure", "UrlShortener.Infrastructure\UrlShortener.Infrastructure.csproj", "{B8C0FE64-FCCA-4276-A245-EFF9B95CB7A6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrlShortener.IntegrationTests", "UrlShortener.IntegrationTests\UrlShortener.IntegrationTests.csproj", "{7E3B5C21-4A9D-4F6B-9C2E-8D1A6F0B3E47}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,6 +53,10 @@ Global
 		{B8C0FE64-FCCA-4276-A245-EFF9B95CB7A6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B8C0FE64-FCCA-4276-A245-EFF9B95CB7A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B8C0FE64-FCCA-4276-A245-EFF9B95CB7A6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E3B5C21-4A9D-4F6B-9C2E-8D1A6F0B3E47}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E3B5C21-4A9D-4F6B-9C2E-8D1A6F0B3E47}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E3B5C21-4A9D-4F6B-9C2E-8D1A6F0B3E47}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E3B5C21-4A9D-4F6B-9C2E-8D1A6F0B3E47}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

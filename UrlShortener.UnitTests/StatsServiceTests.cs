@@ -3,7 +3,7 @@ using UrlShortener.BL;
 using UrlShortener.Model;
 using UrlShortener.Model.Repository;
 
-namespace UrlShortener.Tests;
+namespace UrlShortener.UnitTests;
 
 public class StatsServiceTests
 {

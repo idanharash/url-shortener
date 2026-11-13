@@ -1,7 +1,6 @@
-﻿namespace UrlShortener.Model.Service
+namespace UrlShortener.Model.Service;
+
+public interface IClickHandlerService
 {
-    public interface IClickHandlerService
-    {
-        Task HandleClickAsync(string code);
-    }
+    Task HandleClickAsync(string code);
 }

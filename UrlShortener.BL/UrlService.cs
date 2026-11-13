@@ -1,80 +1,51 @@
-﻿using UrlShortener.Model;
-using UrlShortener.Model.Observability;
+using UrlShortener.Model;
 using UrlShortener.Model.QueueProducer;
 using UrlShortener.Model.Repository;
 using UrlShortener.Model.Service;
 
-namespace UrlShortener.BL
+namespace UrlShortener.BL;
+
+public class UrlService(
+    IUrlRepository repository,
+    ICodeGeneratorService codeGenerator,
+    ICacheService cache,
+    IClickQueueProducer clicks) : IUrlService
 {
-    public class UrlService: IUrlService
+    // With 62^5 (~916M) possible codes a collision is rare; several in a row means something else is wrong.
+    public const int MaxCodeAttempts = 5;
+
+    public async Task<ShortenUrlResponse> CreateShortUrl(string baseUrl, string siteUrl)
     {
-        private readonly IUrlRepository _urlRepository;
-        private readonly ICodeGeneratorService _codeGeneratorService;
-        private readonly ICacheService _cacheService;
-        private readonly IClickQueueProducer _clickQueueProducer;
-        private readonly IAppTracer _tracer;
+        for (var attempt = 1; attempt <= MaxCodeAttempts; attempt++)
+        {
+            var created = await repository.TryCreateAsync(codeGenerator.GenerateCode(), siteUrl);
+            if (created is null)
+                continue; // code already taken: try a new one
 
-        public UrlService(IUrlRepository urlRepository, ICodeGeneratorService codeGeneratorService, ICacheService cacheService, IClickQueueProducer clickQueueProducer,
-            IAppTracer tracer)
-        {
-            _urlRepository = urlRepository;
-            _codeGeneratorService = codeGeneratorService;
-            _cacheService = cacheService;
-            _clickQueueProducer = clickQueueProducer;
-            _tracer = tracer;
-        }
-        public async Task<ShortenUrlResponse> CreateShortUrl(string baseUrl,string siteUrl)
-        {
-            var dbEntry = await _urlRepository.CreateShortUrl(siteUrl, _codeGeneratorService.GenerateCode());
-            var shortUrl = $"{baseUrl}/{dbEntry.Code}";
-            await _cacheService.SetEntryAsync(dbEntry.Code,
-                    new ShortUrlCacheEntry() { OriginalUrl = dbEntry.OriginalUrl, ClickCount = dbEntry.ClickCount, CreatedAt = dbEntry.CreatedAt });
-            return new ShortenUrlResponse { Code = dbEntry.Code, ShortUrl = shortUrl };
+            await cache.SetOriginalUrlAsync(created.Code, created.OriginalUrl);
+            return new ShortenUrlResponse { Code = created.Code, ShortUrl = $"{baseUrl}/{created.Code}" };
         }
 
-        public async Task<string?> GetOriginalUrl(string code)
+        throw new InvalidOperationException($"Could not generate a unique short code after {MaxCodeAttempts} attempts.");
+    }
+
+    public async Task<string?> GetOriginalUrl(string code)
+    {
+        if (!CodeGeneratorService.IsValidFormat(code))
+            return null;
+
+        var originalUrl = await cache.GetOriginalUrlAsync(code);
+        if (originalUrl is null)
         {
-            return await _tracer.TraceAsync("GetOriginalUrl", "App", async activity =>
-            {
-                activity?.SetTag("url.code", code);
+            var entry = await repository.GetByCode(code);
+            if (entry is null)
+                return null;
 
-                var cacheEntry = await _tracer.TraceAsync("Cache Lookup", "Cache", _ =>
-                    _cacheService.GetEntryAsync(code));
-
-                if (cacheEntry != null)
-                {
-                    await _tracer.TraceAsync("Send Click (cached)", "Messaging", _ =>
-                    {
-                        _clickQueueProducer.SendClick(code);
-                        return Task.CompletedTask;
-                    });
-
-                    return cacheEntry.OriginalUrl;
-                }
-
-                var dbEntry = await _tracer.TraceAsync("DB Fetch", "Database", _ =>
-                    _urlRepository.GetByCode(code));
-
-                if (dbEntry == null) return null;
-
-                await _tracer.TraceAsync("Send Click (db)", "Messaging", _ =>
-                {
-                    _clickQueueProducer.SendClick(code);
-                    return Task.CompletedTask;
-                });
-
-                await _tracer.TraceAsync("Cache Set", "Cache", _ =>
-                    _cacheService.SetEntryAsync(code, new ShortUrlCacheEntry
-                    {
-                        OriginalUrl = dbEntry.OriginalUrl,
-                        ClickCount = dbEntry.ClickCount,
-                        CreatedAt = dbEntry.CreatedAt
-                    }));
-
-                return dbEntry.OriginalUrl;
-            });
+            originalUrl = entry.OriginalUrl;
+            await cache.SetOriginalUrlAsync(code, originalUrl);
         }
 
-
+        clicks.EnqueueClick(code);
+        return originalUrl;
     }
 }

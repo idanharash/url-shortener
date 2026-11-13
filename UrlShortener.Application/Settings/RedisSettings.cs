@@ -1,8 +1,10 @@
-﻿namespace UrlShortener.Application.Settings
-{
-    public class RedisSettings
-    {
-        public string ConnectionString { get; set; } = default!;
-    }
+﻿using System.ComponentModel.DataAnnotations;
 
+namespace UrlShortener.Application.Settings;
+
+public sealed class RedisSettings
+{
+    public const string SectionName = "Redis";
+
+    [Required] public string ConnectionString { get; set; } = string.Empty;
 }

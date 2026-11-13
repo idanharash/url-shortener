@@ -1,7 +1,6 @@
-﻿namespace UrlShortener.Model.Service
+namespace UrlShortener.Model.Service;
+
+public interface ICodeGeneratorService
 {
-    public interface ICodeGeneratorService
-    {
-        string GenerateCode();
-    }
+    string GenerateCode();
 }

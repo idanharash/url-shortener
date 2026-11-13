@@ -1,11 +1,14 @@
-﻿namespace UrlShortener.Infrastructure.Messaging
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace UrlShortener.Infrastructure.Messaging;
+
+public sealed class RabbitMqSettings
 {
-    public class RabbitMqSettings
-    {
-        public string Host { get; set; } = null!;
-        public int Port { get; set; }
-        public string Username { get; set; } = null!;
-        public string Password { get; set; } = null!;
-        public string QueueName { get; set; } = null!;
-    }
+    public const string SectionName = "RabbitMQ";
+
+    [Required] public string Host { get; set; } = string.Empty;
+    [Range(1, 65535)] public int Port { get; set; }
+    [Required] public string Username { get; set; } = string.Empty;
+    [Required] public string Password { get; set; } = string.Empty;
+    [Required] public string QueueName { get; set; } = string.Empty;
 }

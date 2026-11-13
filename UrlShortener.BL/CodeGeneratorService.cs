@@ -1,23 +1,16 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using UrlShortener.Model.Service;
 
-namespace UrlShortener.BL
+namespace UrlShortener.BL;
+
+public class CodeGeneratorService : ICodeGeneratorService
 {
-    public class CodeGeneratorService: ICodeGeneratorService
-    {
-        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        const int codeLength = 5;
-        public string GenerateCode()
-        {
-            var bytes = new byte[codeLength];
-            using var rng = RandomNumberGenerator.Create();
-            rng.GetBytes(bytes);
+    public const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    public const int CodeLength = 5;
 
-            var code = new char[codeLength];
-            for (int i = 0; i < codeLength; i++)
-                code[i] = chars[bytes[i] % chars.Length];
+    // Cryptographically random and unbiased (unlike `byte % 62`), so codes cannot be guessed in sequence.
+    public string GenerateCode() => RandomNumberGenerator.GetString(Alphabet, CodeLength);
 
-            return new string(code);
-        }
-    }
+    /// <summary>Lets lookups reject impossible codes (e.g. /favicon.ico) without touching Redis or the database.</summary>
+    public static bool IsValidFormat(string code) => code.Length == CodeLength && code.All(char.IsAsciiLetterOrDigit);
 }

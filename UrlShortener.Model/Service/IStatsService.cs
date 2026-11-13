@@ -1,7 +1,6 @@
-﻿namespace UrlShortener.Model.Service
+namespace UrlShortener.Model.Service;
+
+public interface IStatsService
 {
-    public interface IStatsService
-    {
-        Task<GetStatsByCodeResponse?> GetByCode(string code);
-    }
+    Task<GetStatsByCodeResponse?> GetByCode(string code);
 }

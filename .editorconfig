@@ -1,0 +1,29 @@
+root = true
+
+[*]
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,props,json,yml}]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+
+# One namespace style across the solution.
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_diagnostic.IDE0161.severity = warning
+
+# Analyzer rules that don't fit this project. Each one is a deliberate decision:
+
+# ASP.NET Core has no synchronization context, so ConfigureAwait(false) adds noise without benefit.
+dotnet_diagnostic.CA2007.severity = none
+# LoggerMessage source generators pay off on hot paths with high log volume; not needed at this scale.
+dotnet_diagnostic.CA1848.severity = none
+# This is an application, not a library: public types are not a published API surface.
+dotnet_diagnostic.CA1515.severity = none
+
+[UrlShortener.Tests/**.cs]
+# Test names use underscores to separate the scenario from the expected result.
+dotnet_diagnostic.CA1707.severity = none

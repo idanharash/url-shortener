@@ -12,8 +12,13 @@ services:
       db:
         condition: service_healthy
 
-  # Merged into the web service from docker-compose.yml: start it only after migrations succeed.
+  # Merged into the web and worker services from docker-compose.yml: start them only after migrations succeed.
   web:
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
     depends_on:
       migrate:
         condition: service_completed_successfully

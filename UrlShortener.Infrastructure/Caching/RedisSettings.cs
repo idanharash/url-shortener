@@ -1,6 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
-namespace UrlShortener.Application.Settings;
+namespace UrlShortener.Infrastructure.Caching;
 
 public sealed class RedisSettings
 {

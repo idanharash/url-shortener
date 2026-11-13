@@ -22,14 +22,21 @@ cd url-shortener
 cp .env.example .env          # Windows cmd: copy .env.example .env
 ```
 
-**Before the first start, open `.env` and set both passwords.** They are empty on purpose, so no password is ever committed. Choose your own values (`.env` is git-ignored, so they stay on your machine):
+**Before the first start, open `.env` and set the two passwords and the API key.** They are empty on purpose, so no secret is ever committed. Choose your own values (`.env` is git-ignored, so they stay on your machine):
 
 ```dotenv
 POSTGRES_PASSWORD=<choose-a-password>
 RABBITMQ_PASSWORD=<choose-another-password>
+API_KEY=<at-least-32-characters>
 ```
 
-That is the only required configuration. PostgreSQL and RabbitMQ are created with these values on the first start, and the API receives the same values automatically, so you never type them anywhere else when running in Docker. If you skip this step, Compose stops with `required variable POSTGRES_PASSWORD is missing a value`.
+Generate the API key with `openssl rand -hex 32` (Linux, macOS, Git Bash) or, on Windows, in PowerShell (any version, no extra tools):
+
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b | ForEach-Object { $_.ToString('x2') }) -join ''
+```
+
+That is the only required configuration. PostgreSQL and RabbitMQ are created with these values on the first start, and the API receives the same values automatically, so you never type them anywhere else when running in Docker. If you skip this step, Compose stops with `required variable POSTGRES_PASSWORD is missing a value` (or `RABBITMQ_PASSWORD` / `API_KEY`).
 
 All variables in `.env`:
 
@@ -37,6 +44,7 @@ All variables in `.env`:
 |---|---|---|---|
 | `POSTGRES_PASSWORD` | **yes** | – | PostgreSQL superuser password; Compose refuses to start without it |
 | `RABBITMQ_PASSWORD` | **yes** | – | RabbitMQ user password; Compose refuses to start without it |
+| `API_KEY` | **yes** | – | Key clients send in the `X-Api-Key` header to create links (at least 32 characters); Compose refuses to start without it |
 | `POSTGRES_USER` | no | `postgres` | PostgreSQL user |
 | `POSTGRES_DB` | no | `url_shortener` | Database name |
 | `RABBITMQ_USERNAME` | no | `urlshortener` | RabbitMQ user |
@@ -110,8 +118,10 @@ curl http://localhost:5000/health
 
 **Shorten a URL:**
 
+Creating links needs the API key from `.env` in the `X-Api-Key` header; redirects and stats are public.
+
 ```bash
-curl -X POST http://localhost:5000/api/shorten -H "Content-Type: application/json" -d '{"url":"https://example.com"}'
+curl -X POST http://localhost:5000/api/shorten -H "X-Api-Key: <API_KEY>" -H "Content-Type: application/json" -d '{"url":"https://example.com"}'
 # {"code":"aZ3kQ","shortUrl":"http://localhost:5000/aZ3kQ"}
 ```
 
@@ -142,9 +152,10 @@ Clicks are counted asynchronously through RabbitMQ, so the count can take a mome
 |---|---|
 | `{"url":"javascript:alert(1)"}` or `{"url":"not-a-url"}` | 400 with a validation message |
 | `GET /doesnotexist` or `GET /api/stats/zzzzz` | 404 |
+| `POST /api/shorten` without `X-Api-Key`, or with a wrong key | 401 |
 | More than 20 `POST /api/shorten` per minute from one IP | 429 with a `Retry-After` header |
 
-**With Swagger:** open http://localhost:5000/swagger, expand `POST /api/shorten`, click *Try it out*, send `{ "url": "https://example.com" }`, then call `GET /api/stats/{code}` with the returned code. Test the redirect itself with curl or the browser: Swagger UI follows the 302 to the external site, which the browser usually blocks (CORS), so it shows an error even though the redirect works.
+**With Swagger:** open http://localhost:5000/swagger, click *Authorize* and enter the API key, expand `POST /api/shorten`, click *Try it out*, send `{ "url": "https://example.com" }`, then call `GET /api/stats/{code}` with the returned code. Test the redirect itself with curl or the browser: Swagger UI follows the 302 to the external site, which the browser usually blocks (CORS), so it shows an error even though the redirect works.
 
 ## 6. Stop, restart and reset
 
@@ -171,6 +182,7 @@ docker compose up -d --wait db redis rabbitmq jaeger          # same as: bash st
 #    the API, the Worker and the migrations project share them)
 dotnet user-secrets set "Postgres:Password" "<POSTGRES_PASSWORD>" --project UrlShortener.Application
 dotnet user-secrets set "RabbitMQ:Password" "<RABBITMQ_PASSWORD>" --project UrlShortener.Application
+dotnet user-secrets set "Auth:ApiKeys:0" "<API_KEY>" --project UrlShortener.Application
 
 # 3. Migrations, then the API on http://localhost:5000 (Development: Swagger enabled)
 dotnet run --project UrlShortener.Migrations
@@ -189,10 +201,11 @@ Stop the Docker `web` and `worker` containers first if they are running (`docker
 | Symptom | Cause and fix |
 |---|---|
 | `error during connect … dockerDesktopLinuxEngine: The system cannot find the file specified` (Windows), or `Cannot connect to the Docker daemon` | Docker isn't running. Start Docker Desktop and wait for "Engine running"; `docker version` must show a **Server** section. |
-| `required variable POSTGRES_PASSWORD is missing a value` (or `RABBITMQ_PASSWORD`) | `.env` is missing or the password is empty: see [step 2](#2-clone-and-configure). |
+| `required variable POSTGRES_PASSWORD is missing a value` (or `RABBITMQ_PASSWORD`, `API_KEY`) | `.env` is missing or the password is empty: see [step 2](#2-clone-and-configure). |
 | `Bind for 0.0.0.0:5432 failed: port is already allocated` (or another port) | Another program uses the port; stop it (often a local PostgreSQL or Redis). |
 | `container url-shortener-db-1 is unhealthy`; `docker compose logs db` shows `database files are incompatible with server` | An existing `pgdata` volume was created by a different PostgreSQL version (e.g. by an older version of this project). Reset it: `docker compose down -v` (deletes the local data). |
 | `migrate` exits with an error, `web` doesn't start | `docker compose logs migrate`. A password error after changing `POSTGRES_PASSWORD` means the old volume still has the old one: `docker compose down -v`. |
-| API exits at startup with `Missing or invalid configuration: …` | A required setting is empty; the message names it. Outside Docker this is usually a missing `dotnet user-secrets` value. |
+| API exits at startup with `Missing or invalid configuration: …` | A required setting is empty; the message names it. Outside Docker this is usually a missing `dotnet user-secrets` value; `Auth:ApiKeys` also fails if the key is shorter than 32 characters. |
+| `POST /api/shorten` returns 401 | The `X-Api-Key` header is missing or doesn't match `API_KEY` in `.env`. After changing `.env`, run `docker compose up -d` so the API picks up the new value. |
 | API log shows `PRECONDITION_FAILED … inequivalent arg 'x-dead-letter-exchange'` | A RabbitMQ container from an older version of this project still has the old queue: `docker compose up -d --force-recreate rabbitmq`. |
 | `/health` reports `Degraded` | Redis or RabbitMQ is down; the description says which. Redirects still work. Check `docker compose ps`. |

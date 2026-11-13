@@ -1,6 +1,8 @@
 using System.Globalization;
 using FluentValidation;
 using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.OpenApi.Models;
 using OpenTelemetry.Trace;
 using Prometheus;
 using Serilog;
@@ -9,6 +11,7 @@ using UrlShortener.Application.Dto;
 using UrlShortener.Application.Extensions;
 using UrlShortener.Application.Health;
 using UrlShortener.Application.Middleware;
+using UrlShortener.Application.Security;
 using UrlShortener.Application.Settings;
 using UrlShortener.Application.Validators;
 using UrlShortener.Infrastructure.DependencyInjection;
@@ -36,6 +39,10 @@ try
 
     builder.Services.AddValidatedSettings<AppSettings>(builder.Configuration, AppSettings.SectionName);
     builder.Services.AddValidatedSettings<RateLimitingSettings>(builder.Configuration, RateLimitingSettings.SectionName);
+    builder.Services.AddValidatedSettings<ApiKeySettings>(builder.Configuration, ApiKeySettings.SectionName);
+    builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
+        .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, configureOptions: null);
+    builder.Services.AddAuthorization();
     builder.Services.AddPostgres(builder.Configuration);
     builder.Services.AddRedisCache(builder.Configuration);
     // The API only publishes clicks; UrlShortener.Worker consumes and stores them.
@@ -50,7 +57,23 @@ try
     // Unhandled errors become RFC 7807 problem responses without stack traces.
     builder.Services.AddProblemDetails();
     builder.Services.AddControllers();
-    builder.Services.AddSwaggerGen();
+    builder.Services.AddSwaggerGen(swagger =>
+    {
+        // Adds an "Authorize" button for the API key; only POST /api/shorten requires it.
+        swagger.AddSecurityDefinition(ApiKeyAuthenticationHandler.SchemeName, new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.ApiKey,
+            In = ParameterLocation.Header,
+            Name = ApiKeyAuthenticationHandler.HeaderName
+        });
+        swagger.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
+            [new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = ApiKeyAuthenticationHandler.SchemeName }
+            }] = []
+        });
+    });
     builder.Services.AddScoped<IValidator<UrlRequestDto>, UrlRequestDtoValidator>();
     builder.Services.AddFluentValidationAutoValidation();
 
@@ -70,6 +93,9 @@ try
     app.UseWhen(context => HttpMethods.IsPost(context.Request.Method) &&
                            context.Request.Path.StartsWithSegments("/api/shorten"),
         appBuilder => appBuilder.UseMiddleware<RateLimitingMiddleware>());
+    // After the rate limiter, so guessing API keys is rate limited too.
+    app.UseAuthentication();
+    app.UseAuthorization();
     app.MapMonitoringEndpoints();
     app.MapControllers();
     app.Run();

@@ -51,6 +51,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       App__PublicBaseUrl: http://localhost:5000
+      Auth__ApiKeys__0: ${API_KEY:?Set API_KEY in .env (see .env.example)}
       Postgres__Host: db
       Postgres__Database: ${POSTGRES_DB:-url_shortener}
       Postgres__Username: ${POSTGRES_USER:-postgres}

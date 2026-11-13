@@ -1,7 +1,7 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using Npgsql;
 
-namespace UrlShortener.Application.Settings;
+namespace UrlShortener.Infrastructure.Persistence;
 
 public sealed class PostgresSettings
 {

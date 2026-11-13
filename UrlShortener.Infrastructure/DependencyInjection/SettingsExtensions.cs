@@ -1,6 +1,9 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace UrlShortener.Application.Extensions;
+namespace UrlShortener.Infrastructure.DependencyInjection;
 
 public static class SettingsExtensions
 {
@@ -22,7 +25,7 @@ public static class SettingsExtensions
                 "Set it in SharedConfig/appsettings.json, user-secrets or environment variables.");
         }
 
-        services.AddSingleton(settings);
+        services.TryAddSingleton(settings); // hosts may register the same section from several places
         return settings;
     }
 }

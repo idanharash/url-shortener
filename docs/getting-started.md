@@ -40,7 +40,7 @@ All variables in `.env`:
 | `POSTGRES_USER` | no | `postgres` | PostgreSQL user |
 | `POSTGRES_DB` | no | `url_shortener` | Database name |
 | `RABBITMQ_USERNAME` | no | `urlshortener` | RabbitMQ user |
-| `ASPNETCORE_ENVIRONMENT` | no | `Development` in `.env.example` (`Production` if unset) | `Development` enables Swagger and prints trace spans to the API log |
+| `ASPNETCORE_ENVIRONMENT` | no | `Development` in `.env.example` (`Production` if unset) | `Development` enables Swagger. Performance is the same in both; for benchmarks use either |
 
 `.env` is git-ignored. Compose passes these values to the containers as environment variables (see the `environment` sections in `docker-compose.yml`); every other setting comes from [`SharedConfig/appsettings.json`](../SharedConfig/appsettings.json) (see [Configuration](../ReadMe.md#configuration)). No other configuration is needed for Docker.
 
@@ -57,7 +57,7 @@ This one command uses `docker-compose.yml` plus `docker-compose.override.yml` (C
 1. starts **PostgreSQL**, **Redis**, **RabbitMQ** and **Jaeger**;
 2. waits until PostgreSQL, Redis and RabbitMQ pass their health checks;
 3. runs the **database migrations** once in the `migrate` container (FluentMigrator), which then exits;
-4. starts the **API** (`web`) only after the migrations succeeded, on http://localhost:5000.
+4. starts the **API** (`web`, on http://localhost:5000) and the **Worker** (`worker`, which stores the click events) only after the migrations succeeded.
 
 The first run downloads images and the .NET SDK image and builds the solution, so it takes a few minutes; later runs are fast.
 
@@ -71,6 +71,7 @@ The first run downloads images and the .NET SDK image and builds the solution, s
 docker compose ps -a
 docker compose logs migrate       # first run: applies InitialCreate; later runs: nothing new to apply
 docker compose logs -f web        # API log; Ctrl+C to stop following
+docker compose logs worker        # Worker log: "Consuming click events from click-events"
 ```
 
 **API and its dependencies.** The health endpoint checks PostgreSQL, Redis and RabbitMQ:
@@ -91,7 +92,7 @@ curl http://localhost:5000/health
 |---|---|---|
 | PostgreSQL | `docker compose exec db psql -U postgres -d url_shortener -c "\dt"` | Tables `short_urls` and `VersionInfo` |
 | Redis | `docker compose exec redis redis-cli ping` | `PONG` |
-| RabbitMQ | `docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers` | `click-events` with 1 consumer, and `click-events.dead-letter` |
+| RabbitMQ | `docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers` | `click-events` with 1 consumer (the Worker), and `click-events.dead-letter` |
 
 (If you changed `POSTGRES_USER` or `POSTGRES_DB` in `.env`, use those values in the `psql` command.)
 
@@ -99,6 +100,7 @@ curl http://localhost:5000/health
 
 | What | URL |
 |---|---|
+| Worker metrics (`url_clicks_processed_total`, …) | `docker compose port worker 9091` prints the host address; open `http://<that address>/metrics` |
 | Swagger (only when `ASPNETCORE_ENVIRONMENT=Development`) | http://localhost:5000/swagger |
 | RabbitMQ management (log in with `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD`) | http://localhost:15672 |
 | Jaeger traces (service `UrlShortener`) | http://localhost:16686 |
@@ -151,7 +153,8 @@ Clicks are counted asynchronously through RabbitMQ, so the count can take a mome
 | Stop everything, **keep data** | `docker compose down` |
 | Start again (no rebuild) | `docker compose up -d` |
 | Rebuild after code changes | `docker compose up -d --build` |
-| Restart only the API | `docker compose restart web` |
+| Restart only the API / the Worker | `docker compose restart web` / `docker compose restart worker` |
+| Run 3 Workers (more click throughput) | `docker compose up -d --scale worker=3` |
 | Stop and **delete all data** (database volume) | `docker compose down -v` |
 
 Only PostgreSQL keeps data between restarts (volume `pgdata`). Redis and RabbitMQ have no volumes: `docker compose down` empties the cache, which refills from PostgreSQL, and drops click events still waiting in the queue.
@@ -165,16 +168,19 @@ Run the dependencies in Docker and the API with `dotnet run`, for debugging:
 docker compose up -d --wait db redis rabbitmq jaeger          # same as: bash start-dependencies.sh
 
 # 2. Passwords for the app, the same values as in .env (stored with dotnet user-secrets, outside the repo;
-#    the API and the migrations project share them)
+#    the API, the Worker and the migrations project share them)
 dotnet user-secrets set "Postgres:Password" "<POSTGRES_PASSWORD>" --project UrlShortener.Application
 dotnet user-secrets set "RabbitMQ:Password" "<RABBITMQ_PASSWORD>" --project UrlShortener.Application
 
 # 3. Migrations, then the API on http://localhost:5000 (Development: Swagger enabled)
 dotnet run --project UrlShortener.Migrations
 dotnet run --project UrlShortener.Application
+
+# 4. In a second terminal: the Worker, which stores the clicks (without it, clicks wait in the queue)
+dotnet run --project UrlShortener.Worker
 ```
 
-Stop the Docker `web` container first if it is running (`docker compose stop web`); both use port 5000. The other settings in `SharedConfig/appsettings.json` already point to `localhost` and the default user names from `.env.example`; if you changed `POSTGRES_USER`, `POSTGRES_DB` or `RABBITMQ_USERNAME`, set `Postgres:Username`, `Postgres:Database` or `RabbitMQ:Username` the same way.
+Stop the Docker `web` and `worker` containers first if they are running (`docker compose stop web worker`); the API uses port 5000 and the Worker's metrics port 9091. The other settings in `SharedConfig/appsettings.json` already point to `localhost` and the default user names from `.env.example`; if you changed `POSTGRES_USER`, `POSTGRES_DB` or `RABBITMQ_USERNAME`, set `Postgres:Username`, `Postgres:Database` or `RabbitMQ:Username` the same way.
 
 **Tests:** `dotnet test UrlShortener.UnitTests` needs only the SDK; `dotnet test` also runs the integration tests, which start their own PostgreSQL, Redis and RabbitMQ containers and need Docker running (they don't use or touch the Compose stack).
 

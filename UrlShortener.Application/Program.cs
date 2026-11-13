@@ -1,6 +1,7 @@
 using System.Globalization;
 using FluentValidation;
 using FluentValidation.AspNetCore;
+using OpenTelemetry.Trace;
 using Prometheus;
 using Serilog;
 using Serilog.Enrichers.Span;
@@ -10,6 +11,7 @@ using UrlShortener.Application.Health;
 using UrlShortener.Application.Middleware;
 using UrlShortener.Application.Settings;
 using UrlShortener.Application.Validators;
+using UrlShortener.Infrastructure.DependencyInjection;
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
@@ -34,11 +36,16 @@ try
 
     builder.Services.AddValidatedSettings<AppSettings>(builder.Configuration, AppSettings.SectionName);
     builder.Services.AddValidatedSettings<RateLimitingSettings>(builder.Configuration, RateLimitingSettings.SectionName);
-    builder.Services.AddPersistence(builder.Configuration);
-    builder.Services.AddMessagingServices(builder.Configuration);
+    builder.Services.AddPostgres(builder.Configuration);
+    builder.Services.AddRedisCache(builder.Configuration);
+    // The API only publishes clicks; UrlShortener.Worker consumes and stores them.
+    builder.Services.AddClickPublisher(builder.Configuration);
     builder.Services.AddAppServices();
-    builder.Services.AddResiliencePolicies();
-    builder.Services.AddTelemetry(builder.Configuration, builder.Environment);
+    builder.Services.AddTracing(builder.Configuration, tracing => tracing
+        .AddAspNetCoreInstrumentation(options =>
+            options.Filter = context => !context.Request.Path.StartsWithSegments("/health") &&
+                                        !context.Request.Path.StartsWithSegments("/metrics"))
+        .AddHttpClientInstrumentation());
     builder.Services.AddDependencyHealthChecks();
     // Unhandled errors become RFC 7807 problem responses without stack traces.
     builder.Services.AddProblemDetails();

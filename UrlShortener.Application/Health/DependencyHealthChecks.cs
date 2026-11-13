@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using StackExchange.Redis;
-using UrlShortener.Application.Settings;
 using UrlShortener.Infrastructure.Messaging;
+using UrlShortener.Infrastructure.Persistence;
 
 namespace UrlShortener.Application.Health;
 
@@ -44,10 +44,11 @@ public sealed class RedisHealthCheck(IConnectionMultiplexer redis) : IHealthChec
     }
 }
 
-public sealed class RabbitMqHealthCheck(ClickQueueProducer producer, ClickQueueConsumer consumer) : IHealthCheck
+// The API only publishes clicks; whether the Worker is consuming them shows in its own logs and metrics.
+public sealed class RabbitMqHealthCheck(ClickQueueProducer producer) : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default) =>
-        Task.FromResult(producer.IsConnected && consumer.IsConsuming
+        Task.FromResult(producer.IsConnected
             ? HealthCheckResult.Healthy()
             : HealthCheckResult.Degraded("RabbitMQ is unreachable; clicks are buffered in memory and counts are delayed"));
 }

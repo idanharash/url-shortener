@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\UrlShortener.Application\UrlShortener.Application.csproj" />
+    <ProjectReference Include="..\UrlShortener.Worker\UrlShortener.Worker.csproj" />
     <!-- For the real schema: the fixture runs the same FluentMigrator migrations as production. -->
     <ProjectReference Include="..\UrlShortener.Migrations\UrlShortener.Migrations.csproj" />
   </ItemGroup>

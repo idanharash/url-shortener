@@ -32,7 +32,7 @@ RABBITMQ_PASSWORD=<choose-another-password>
 **3. Run and check**
 
 ```bash
-docker compose up -d --build      # starts PostgreSQL, Redis, RabbitMQ, Jaeger, runs migrations, then the API
+docker compose up -d --build      # PostgreSQL, Redis, RabbitMQ, Jaeger, migrations, then the API and the Worker
 curl http://localhost:5000/health # {"status":"Healthy",...} once everything is up
 ```
 
@@ -41,7 +41,7 @@ curl http://localhost:5000/health # {"status":"Healthy",...} once everything is 
 ```bash
 curl -X POST http://localhost:5000/api/shorten -H "Content-Type: application/json" -d '{"url":"https://example.com"}'
 curl -i http://localhost:5000/<code>          # 302 to https://example.com
-curl http://localhost:5000/api/stats/<code>   # {"createdAt":"…","clickCount":1}
+curl http://localhost:5000/api/stats/<code>   # {"createdAt":"…Z","clickCount":1} (counted asynchronously: allow a second)
 docker compose down                           # stop (add -v to delete the data)
 ```
 
@@ -61,9 +61,12 @@ flowchart LR
     Client -->|GET /code| API
     Client -->|GET /api/stats/code| API
 
-    subgraph API [ASP.NET Core API]
+    subgraph API [API: UrlShortener.Application]
         Controllers --> UrlService & StatsService
         Producer[Click buffer + publisher]
+    end
+
+    subgraph Worker [Worker: UrlShortener.Worker, scalable]
         Consumer[Click consumer]
     end
 
@@ -81,7 +84,7 @@ flowchart LR
 |---|---|
 | **Shorten** | Validate URL → generate random code → `INSERT … ON CONFLICT DO NOTHING` (new code on collision) → cache the mapping |
 | **Redirect** | Validate code format → Redis → (miss) PostgreSQL and re-cache → enqueue click → **302** |
-| **Click** | In-memory bounded buffer → background publisher → RabbitMQ → consumer → atomic `UPDATE` → ack |
+| **Click** | In-memory bounded buffer → background publisher (API) → RabbitMQ → consumer (Worker) → atomic `UPDATE` → ack |
 | **Stats** | Read from PostgreSQL, the single source of truth for counts |
 
 ---
@@ -91,6 +94,8 @@ flowchart LR
 **302, not 301.** Browsers cache permanent redirects, so repeat visits would never reach the service and would not be counted. A 302 costs one request to us per click; counting clicks is a feature, so that cost is the point.
 
 **Clicks are counted asynchronously.** A redirect only drops the click into an in-memory buffer; a background publisher sends it to RabbitMQ and a consumer applies an atomic `UPDATE … SET click_count = click_count + 1`. Redirect latency doesn't depend on database writes, and write load is smoothed by the queue. The price is **eventual consistency**: stats lag behind by the time a click spends in the buffer and the queue.
+
+**The consumer runs in its own process (`UrlShortener.Worker`).** Redirect traffic and click processing have different load profiles, so they scale separately: more API replicas for traffic, more Worker replicas for queue throughput (`docker compose up -d --scale worker=3`; RabbitMQ spreads messages across consumers, and the atomic `UPDATE` keeps counts exact). A failing or slow Worker never affects redirects; clicks just wait in the queue. The cost is one more deployable; both hosts share the same Infrastructure registrations (`AddPostgres`, `AddClickPublisher`, `AddClickConsumer`, …), so there is no duplicated setup.
 
 **Delivery is at-least-once, and counts are approximate by design.** A message is acked only after the database update, so a crash between the two can count a click twice. Clicks still in the in-memory buffer are lost if the process crashes. For analytics this is accepted; I deliberately did **not** add a transactional outbox, because writing a row per redirect to the database is exactly the cost the queue exists to avoid. Billing-grade counts would need idempotency keys plus an outbox or publisher confirms.
 
@@ -132,14 +137,16 @@ Accepted URLs: absolute `http`/`https`, at most 2048 characters, not pointing at
 
 ## Configuration
 
-All settings live in [`SharedConfig/appsettings.json`](SharedConfig/appsettings.json) and are validated at startup: a missing or invalid value stops the app with a message naming the setting (never its value). Passwords are not in the file; they come from `.env` in Docker or from `dotnet user-secrets` locally ([details](docs/getting-started.md#2-clone-and-configure)). Tunable behaviour: `App:PublicBaseUrl`, `RateLimiting:PermitLimit` / `Window`, and `Cache:EntryTtl`.
+All settings live in [`SharedConfig/appsettings.json`](SharedConfig/appsettings.json) and are validated at startup: a missing or invalid value stops the app with a message naming the setting (never its value). Passwords are not in the file; they come from `.env` in Docker or from `dotnet user-secrets` locally ([details](docs/getting-started.md#2-clone-and-configure)). Tunable behaviour: `App:PublicBaseUrl`, `RateLimiting:PermitLimit` / `Window`, `Cache:EntryTtl`, `Worker:MetricsPort`, and `OpenTelemetry:ConsoleExporter` (prints every span; debugging only, costs about 4× throughput).
 
 ---
 
 ## Observability
 
-- **Traces** (OpenTelemetry → Jaeger): ASP.NET Core requests plus custom spans for cache, database and messaging, with failures marked as errors.
-- **Metrics** (Prometheus, `/metrics`): HTTP request metrics, plus `url_cache_hits_total`, `url_cache_misses_total`, `url_cache_errors_total`, `url_clicks_published_total`, `url_clicks_processed_total`, `url_clicks_dropped_total`, `url_clicks_dead_lettered_total`.
+- **Traces** (OpenTelemetry → Jaeger, services `UrlShortener` and `UrlShortener.Worker`): ASP.NET Core requests plus custom spans for cache, database and messaging, with failures marked as errors.
+- **Metrics** (Prometheus):
+  - API `/metrics` (port 5000): HTTP request metrics, `url_cache_hits_total`, `url_cache_misses_total`, `url_cache_errors_total`, `url_clicks_published_total`, `url_clicks_dropped_total`.
+  - Worker `/metrics` (port 9091): `url_clicks_processed_total`, `url_clicks_dead_lettered_total`.
 - **Logs** (Serilog): structured, with trace and span IDs on every line.
 
 ---
@@ -155,19 +162,29 @@ dotnet test UrlShortener.IntegrationTests     # integration tests only
 | Project | What it proves |
 |---|---|
 | `UrlShortener.UnitTests` | Business rules in isolation: code collisions and the retry limit, cache hit/miss/fallback, rejecting malformed codes without I/O, URL validation (`javascript:`, `file:`, self-referencing URLs), stats. |
-| `UrlShortener.IntegrationTests` | The real application against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
+| `UrlShortener.IntegrationTests` | The real API and the real Worker against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
 
 CI runs the build and both test projects (GitHub's Linux runners have Docker) and builds both Docker images on every push.
 
 The .NET code analyzers run on every build with the `latest-recommended` rule set (`Directory.Build.props`); the few rules switched off are listed with their reason in `.editorconfig`.
 
-**Benchmark.** `UrlShortenerBenchmark` measures redirect latency (time to the 302, cache warmed first):
+**Benchmark.** `UrlShortenerBenchmark` measures redirect latency end to end (time until the 302 arrives; cache warmed first):
 
 ```bash
 dotnet run -c Release --project UrlShortenerBenchmark -- http://localhost:5000/<code> 5000 50
 ```
 
-No numbers are published here on purpose: results depend on the machine and on whether the app runs in Docker, so measure on your own setup.
+Results on a laptop (Intel Core i7-1165G7, Windows, Docker Desktop), full stack from `docker compose up` with `ASPNETCORE_ENVIRONMENT=Production`, 5,000 requests, 50 concurrent:
+
+| Throughput | Mean | P50 | P95 | P99 | Max |
+|---|---|---|---|---|---|
+| 1,425 req/s | 34.9 ms | 30.6 ms | 70.2 ms | 108.3 ms | 194.3 ms |
+
+All 5,000 requests returned 302, and afterwards the link's `clickCount` was exactly **5,020** (5,000 plus 20 warm-up requests), counted by the separate Worker: no click lost or counted twice under concurrency.
+
+Context: the benchmark client, the API and every dependency share one laptop, and requests go through Docker Desktop's port forwarding, so these are end-to-end numbers on a development machine, not server capacity.
+
+Measuring found one real problem: printing every trace span to the console, which used to be on whenever the environment was `Development`, cut throughput by about 4× (376 req/s, P50 118 ms). It is now an explicit opt-in setting (`OpenTelemetry:ConsoleExporter`, off by default).
 
 ---
 
@@ -177,27 +194,28 @@ In rough priority order:
 
 1. **One database write per click.** Fine for moderate traffic; at high volume the consumer should aggregate clicks and write them in batches (e.g. per-day counters with one upsert per flush).
 2. **Rate limiting by remote IP.** Behind a reverse proxy every client shares the proxy's IP. Production needs `ForwardedHeaders` configured with the proxy's address. A fixed window also allows bursts at window edges; a sliding window or token bucket would smooth that.
-3. **Click consumer runs inside the API process.** Simple to deploy, but the API and the counting can't scale independently. Moving the consumer to a separate worker is a small change since it only depends on `IClickHandlerService`.
-4. **Dead-lettered messages have no automated replay;** they're inspected and moved manually (RabbitMQ management UI or a shovel).
-5. **No authentication or abuse screening.** Anyone can create links, and target URLs aren't checked against malware or phishing lists.
-6. **A few major package upgrades are deferred on purpose:** RabbitMQ.Client 7 (a fully async API, so the publisher and consumer need a rewrite), StackExchange.Redis 3, Npgsql 10 and Swashbuckle (or switching to .NET 10's built-in OpenAPI). Each is a breaking change that deserves its own tested change rather than a version bump; the current versions are supported and run on .NET 10.
-7. **Every request is traced** (`AlwaysOnSampler`). At higher traffic, switch to parent-based ratio sampling.
+3. **Dead-lettered messages have no automated replay;** they're inspected and moved manually (RabbitMQ management UI or a shovel).
+4. **No authentication or abuse screening.** Anyone can create links, and target URLs aren't checked against malware or phishing lists.
+5. **A few major package upgrades are deferred on purpose:** RabbitMQ.Client 7 (a fully async API, so the publisher and consumer need a rewrite), StackExchange.Redis 3, Npgsql 10 and Swashbuckle (or switching to .NET 10's built-in OpenAPI). Each is a breaking change that deserves its own tested change rather than a version bump; the current versions are supported and run on .NET 10.
+6. **Every request is traced** (`AlwaysOnSampler`). At higher traffic, switch to parent-based ratio sampling.
 
 ---
 
 ## Repository structure
 
 ```text
-UrlShortener.Application     ASP.NET Core API: controllers, middleware, health checks, composition root
+UrlShortener.Application     ASP.NET Core API: controllers, middleware, health checks, click publishing
+UrlShortener.Worker          Background service: consumes click events and stores them (scales independently)
 UrlShortener.BL              Business logic: URL creation, redirects, stats, click handling
 UrlShortener.Model           Entities, DTOs and the interfaces the BL depends on
-UrlShortener.Infrastructure  PostgreSQL (NHibernate), Redis cache, RabbitMQ publisher/consumer, telemetry
+UrlShortener.Infrastructure  PostgreSQL (NHibernate), Redis cache, RabbitMQ publisher/consumer, telemetry, and the DI registrations both hosts share
 UrlShortener.Migrations      FluentMigrator schema migrations (separate runner, not on app start)
 UrlShortener.UnitTests       Unit tests: business rules in isolation (xUnit, Moq)
 UrlShortener.IntegrationTests  Real app against real PostgreSQL/Redis/RabbitMQ (Testcontainers)
 UrlShortenerBenchmark        Redirect latency benchmark
 SharedConfig/appsettings.json  Settings shared by the API and the migrations runner
 Directory.Build.props        Target framework, nullable, analyzers for all projects (.editorconfig tunes the rules)
+Dockerfile, Dockerfile.worker, Dockerfile.migrations  Images for the API, the Worker and the migrations runner
 docker-compose.yml (+ .override.yml)  Full stack; the override adds migrations and Jaeger
 .env.example                 Template for the passwords Docker Compose needs
 docs/getting-started.md      Full setup, verification and troubleshooting guide

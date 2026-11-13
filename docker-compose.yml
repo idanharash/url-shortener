@@ -68,5 +68,30 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # Consumes click events and stores them. Scale with: docker compose up -d --scale worker=3
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    ports:
+      - "9091"   # /metrics on a random host port (so several replicas don't clash): docker compose port worker 9091
+    environment:
+      DOTNET_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      Postgres__Host: db
+      Postgres__Database: ${POSTGRES_DB:-url_shortener}
+      Postgres__Username: ${POSTGRES_USER:-postgres}
+      Postgres__Password: ${POSTGRES_PASSWORD}
+      RabbitMQ__Host: rabbitmq
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:-urlshortener}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
+      OpenTelemetry__ServiceName: UrlShortener.Worker
+      OpenTelemetry__OtlpEndpoint: http://jaeger:4317
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
 volumes:
   pgdata:

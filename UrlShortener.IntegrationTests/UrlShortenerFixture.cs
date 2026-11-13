@@ -1,17 +1,22 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Net.Http.Json;
 using FluentMigrator.Runner;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using RabbitMQ.Client;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
 using UrlShortener.Application.Controllers;
+using UrlShortener.Infrastructure.Messaging;
 using UrlShortener.Migrations.Migrations;
+using UrlShortener.Worker;
 
 namespace UrlShortener.IntegrationTests;
 
@@ -23,10 +28,10 @@ public sealed class IntegrationTestsDefinition : ICollectionFixture<UrlShortener
 
 /// <summary>
 /// Starts PostgreSQL, Redis and RabbitMQ once for all integration tests, applies the real migrations and
-/// runs the real application in memory, including the background click publisher and consumer.
+/// runs the real API and the real Worker in memory, so clicks travel API → RabbitMQ → Worker → PostgreSQL.
 /// </summary>
 [SuppressMessage("Reliability", "CA1001:Types that own disposable fields should be disposable",
-    Justification = "xUnit calls IAsyncLifetime.DisposeAsync, which disposes the factory and the containers.")]
+    Justification = "xUnit calls IAsyncLifetime.DisposeAsync, which disposes the factory, the Worker and the containers.")]
 public sealed class UrlShortenerFixture : IAsyncLifetime
 {
     public const string QueueName = "click-events";
@@ -48,6 +53,7 @@ public sealed class UrlShortenerFixture : IAsyncLifetime
         .Build();
 
     private UrlShortenerFactory? _factory;
+    private IHost? _worker;
 
     public UrlShortenerFactory Factory => _factory ?? throw new InvalidOperationException("The fixture is not initialized.");
 
@@ -72,15 +78,25 @@ public sealed class UrlShortenerFixture : IAsyncLifetime
         SetSetting("RabbitMQ__QueueName", QueueName);
         SetSetting("App__PublicBaseUrl", "http://localhost");
         SetSetting("RateLimiting__PermitLimit", "100000"); // the tests create many links quickly
+        SetSetting("Worker__MetricsPort", FreeTcpPort().ToString(CultureInfo.InvariantCulture));
+
+        _worker = WorkerHost.CreateBuilder([]).Build();
+        await _worker.StartAsync();
 
         _factory = new UrlShortenerFactory();
-        await WaitUntilHealthyAsync();
+        await WaitUntilReadyAsync();
     }
 
     public async Task DisposeAsync()
     {
         if (_factory is not null)
             await _factory.DisposeAsync();
+
+        if (_worker is not null)
+        {
+            await _worker.StopAsync();
+            _worker.Dispose();
+        }
 
         await Task.WhenAll(_postgres.DisposeAsync().AsTask(), _redis.DisposeAsync().AsTask(), _rabbitMq.DisposeAsync().AsTask());
     }
@@ -110,20 +126,29 @@ public sealed class UrlShortenerFixture : IAsyncLifetime
         scope.ServiceProvider.GetRequiredService<IMigrationRunner>().MigrateUp();
     }
 
-    // Starts the app and waits until the consumer and publisher are connected (topology declared).
-    private async Task WaitUntilHealthyAsync()
+    // Starts the API and waits until its publisher and the Worker's consumer are connected to RabbitMQ.
+    private async Task WaitUntilReadyAsync()
     {
         using var client = CreateClient();
+        var consumer = _worker!.Services.GetRequiredService<ClickQueueConsumer>();
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (DateTime.UtcNow < deadline)
         {
             var report = await client.GetFromJsonAsync<HealthReport>("/health");
-            if (report?.Status == "Healthy")
+            if (report?.Status == "Healthy" && consumer.IsConsuming)
                 return;
             await Task.Delay(250);
         }
 
-        throw new TimeoutException("The application did not become healthy within 60 seconds.");
+        throw new TimeoutException("The API and the Worker did not become ready within 60 seconds.");
+    }
+
+    // The Worker's /metrics endpoint needs a port; pick a free one so tests never clash with a running Worker.
+    private static int FreeTcpPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static void SetSetting(string name, string value) => Environment.SetEnvironmentVariable(name, value);

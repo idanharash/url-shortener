@@ -176,7 +176,7 @@ dotnet run --project UrlShortener.Application
 
 Stop the Docker `web` container first if it is running (`docker compose stop web`); both use port 5000. The other settings in `SharedConfig/appsettings.json` already point to `localhost` and the default user names from `.env.example`; if you changed `POSTGRES_USER`, `POSTGRES_DB` or `RABBITMQ_USERNAME`, set `Postgres:Username`, `Postgres:Database` or `RabbitMQ:Username` the same way.
 
-**Tests** need only the SDK: `dotnet test`.
+**Tests:** `dotnet test UrlShortener.UnitTests` needs only the SDK; `dotnet test` also runs the integration tests, which start their own PostgreSQL, Redis and RabbitMQ containers and need Docker running (they don't use or touch the Compose stack).
 
 ## Troubleshooting
 

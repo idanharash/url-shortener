@@ -147,10 +147,17 @@ All settings live in [`SharedConfig/appsettings.json`](SharedConfig/appsettings.
 ## Testing
 
 ```bash
-dotnet test
+dotnet test                                   # everything (integration tests need Docker running)
+dotnet test UrlShortener.UnitTests            # unit tests only, about 2 seconds, no Docker
+dotnet test UrlShortener.IntegrationTests     # integration tests only
 ```
 
-Unit tests cover the business rules: code collisions and the retry limit, cache hit/miss/fallback behaviour, rejecting malformed codes without I/O, URL validation (including `javascript:`, `file:` and self-referencing URLs), and stats. CI runs the build and tests and builds both Docker images on every push.
+| Project | What it proves |
+|---|---|
+| `UrlShortener.UnitTests` | Business rules in isolation: code collisions and the retry limit, cache hit/miss/fallback, rejecting malformed codes without I/O, URL validation (`javascript:`, `file:`, self-referencing URLs), stats. |
+| `UrlShortener.IntegrationTests` | The real application against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
+
+CI runs the build and both test projects (GitHub's Linux runners have Docker) and builds both Docker images on every push.
 
 The .NET code analyzers run on every build with the `latest-recommended` rule set (`Directory.Build.props`); the few rules switched off are listed with their reason in `.editorconfig`.
 
@@ -168,14 +175,13 @@ No numbers are published here on purpose: results depend on the machine and on w
 
 In rough priority order:
 
-1. **No integration tests yet.** The behaviour that matters most (atomic counting under concurrency, the dead-letter path, falling back when Redis is down) is covered by design and manual testing, not by automated tests against real PostgreSQL/Redis/RabbitMQ. Next step: Testcontainers + `WebApplicationFactory`.
-2. **One database write per click.** Fine for moderate traffic; at high volume the consumer should aggregate clicks and write them in batches (e.g. per-day counters with one upsert per flush).
-3. **Rate limiting by remote IP.** Behind a reverse proxy every client shares the proxy's IP. Production needs `ForwardedHeaders` configured with the proxy's address. A fixed window also allows bursts at window edges; a sliding window or token bucket would smooth that.
-4. **Click consumer runs inside the API process.** Simple to deploy, but the API and the counting can't scale independently. Moving the consumer to a separate worker is a small change since it only depends on `IClickHandlerService`.
-5. **Dead-lettered messages have no automated replay;** they're inspected and moved manually (RabbitMQ management UI or a shovel).
-6. **No authentication or abuse screening.** Anyone can create links, and target URLs aren't checked against malware or phishing lists.
-7. **A few major package upgrades are deferred on purpose:** RabbitMQ.Client 7 (a fully async API, so the publisher and consumer need a rewrite), StackExchange.Redis 3, Npgsql 10 and Swashbuckle (or switching to .NET 10's built-in OpenAPI). Each is a breaking change that deserves its own tested change rather than a version bump; the current versions are supported and run on .NET 10.
-8. **Every request is traced** (`AlwaysOnSampler`). At higher traffic, switch to parent-based ratio sampling.
+1. **One database write per click.** Fine for moderate traffic; at high volume the consumer should aggregate clicks and write them in batches (e.g. per-day counters with one upsert per flush).
+2. **Rate limiting by remote IP.** Behind a reverse proxy every client shares the proxy's IP. Production needs `ForwardedHeaders` configured with the proxy's address. A fixed window also allows bursts at window edges; a sliding window or token bucket would smooth that.
+3. **Click consumer runs inside the API process.** Simple to deploy, but the API and the counting can't scale independently. Moving the consumer to a separate worker is a small change since it only depends on `IClickHandlerService`.
+4. **Dead-lettered messages have no automated replay;** they're inspected and moved manually (RabbitMQ management UI or a shovel).
+5. **No authentication or abuse screening.** Anyone can create links, and target URLs aren't checked against malware or phishing lists.
+6. **A few major package upgrades are deferred on purpose:** RabbitMQ.Client 7 (a fully async API, so the publisher and consumer need a rewrite), StackExchange.Redis 3, Npgsql 10 and Swashbuckle (or switching to .NET 10's built-in OpenAPI). Each is a breaking change that deserves its own tested change rather than a version bump; the current versions are supported and run on .NET 10.
+7. **Every request is traced** (`AlwaysOnSampler`). At higher traffic, switch to parent-based ratio sampling.
 
 ---
 
@@ -187,7 +193,8 @@ UrlShortener.BL              Business logic: URL creation, redirects, stats, cli
 UrlShortener.Model           Entities, DTOs and the interfaces the BL depends on
 UrlShortener.Infrastructure  PostgreSQL (NHibernate), Redis cache, RabbitMQ publisher/consumer, telemetry
 UrlShortener.Migrations      FluentMigrator schema migrations (separate runner, not on app start)
-UrlShortener.Tests           Unit tests (xUnit, Moq, FluentValidation test helpers)
+UrlShortener.UnitTests       Unit tests: business rules in isolation (xUnit, Moq)
+UrlShortener.IntegrationTests  Real app against real PostgreSQL/Redis/RabbitMQ (Testcontainers)
 UrlShortenerBenchmark        Redirect latency benchmark
 SharedConfig/appsettings.json  Settings shared by the API and the migrations runner
 Directory.Build.props        Target framework, nullable, analyzers for all projects (.editorconfig tunes the rules)

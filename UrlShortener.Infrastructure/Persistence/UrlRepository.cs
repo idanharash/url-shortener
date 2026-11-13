@@ -40,7 +40,7 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
                     ON CONFLICT (code) DO NOTHING
                     RETURNING created_at
                     """)
-                .AddScalar("created_at", NHibernateUtil.DateTime)
+                .AddScalar("created_at", NHibernateUtil.UtcDateTime)
                 .SetParameter("code", code)
                 .SetParameter("originalUrl", originalUrl)
                 .UniqueResultAsync<DateTime?>(ct);

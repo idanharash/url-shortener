@@ -3,7 +3,7 @@ using Moq;
 using StackExchange.Redis;
 using UrlShortener.Infrastructure.Caching;
 
-namespace UrlShortener.Tests;
+namespace UrlShortener.UnitTests;
 
 public class CacheServiceTests
 {

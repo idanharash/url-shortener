@@ -32,12 +32,19 @@ public sealed class CacheService(IConnectionMultiplexer redis, CacheSettings set
         }
     }
 
-    public async Task SetOriginalUrlAsync(string code, string originalUrl)
+    public Task SetOriginalUrlAsync(string code, string originalUrl) =>
+        SetAsync(code, originalUrl, settings.EntryTtl, When.Always);
+
+    // NotExists: if the link was created in the meantime, its mapping must win over the "not found" marker.
+    public Task SetNotFoundAsync(string code) =>
+        SetAsync(code, ICacheService.NotFound, settings.NotFoundTtl, When.NotExists);
+
+    private async Task SetAsync(string code, string value, TimeSpan ttl, When when)
     {
         using var activity = Telemetry.Cache.StartActivity("cache set");
         try
         {
-            await _db.StringSetAsync(Key(code), originalUrl, (TimeSpan?)settings.EntryTtl);
+            await _db.StringSetAsync(Key(code), value, ttl, keepTtl: false, when: when);
         }
         catch (Exception ex) when (ex is RedisException or TimeoutException)
         {

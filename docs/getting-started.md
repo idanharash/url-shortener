@@ -85,14 +85,16 @@ docker compose logs worker        # Worker log: "Consuming click events from cli
 **API and its dependencies.** The health endpoint checks PostgreSQL, Redis and RabbitMQ:
 
 ```bash
-curl http://localhost:5000/health
+curl http://localhost:5001/health
 ```
+
+`/health` and `/metrics` are served on a separate management port (5001, bound to this machine only), not on the public port 5000.
 
 ```json
 {"status":"Healthy","checks":{"postgres":{"status":"Healthy","description":null},"redis":{"status":"Healthy","description":null},"rabbitmq":{"status":"Healthy","description":null}}}
 ```
 
-`Degraded` means Redis or RabbitMQ is unreachable (redirects still work); `Unhealthy` (HTTP 503) means PostgreSQL is unreachable. `http://localhost:5000/health/live` only reports that the API process is up.
+`Degraded` means Redis or RabbitMQ is unreachable (redirects still work); `Unhealthy` (HTTP 503) means PostgreSQL is unreachable. `http://localhost:5001/health/live` only reports that the API process is up.
 
 **Each dependency directly:**
 
@@ -112,7 +114,7 @@ curl http://localhost:5000/health
 | Swagger (only when `ASPNETCORE_ENVIRONMENT=Development`) | http://localhost:5000/swagger |
 | RabbitMQ management (log in with `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD`) | http://localhost:15672 |
 | Jaeger traces (service `UrlShortener`) | http://localhost:16686 |
-| Prometheus metrics | http://localhost:5000/metrics |
+| Prometheus metrics | http://localhost:5001/metrics |
 
 ## 5. Try it
 

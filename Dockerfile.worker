@@ -9,4 +9,6 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
 EXPOSE 9091
+# Non-root user built into the .NET images
+USER $APP_UID
 ENTRYPOINT ["dotnet", "UrlShortener.Worker.dll"]

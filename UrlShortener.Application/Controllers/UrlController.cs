@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UrlShortener.Application.Dto;
+using UrlShortener.Application.Middleware;
 using UrlShortener.Application.Settings;
 using UrlShortener.Model.Service;
 
@@ -13,6 +14,7 @@ public class UrlController(IUrlService urlService, AppSettings settings) : Contr
     // Creating links requires an API key; redirects and stats stay public.
     [Authorize]
     [HttpPost("shorten")]
+    [RateLimit(RateLimitPolicy.Shorten)]
     public async Task<IActionResult> ShortenUrl([FromBody] UrlRequestDto request)
     {
         return Ok(await urlService.CreateShortUrl(settings.PublicBaseUrl.TrimEnd('/'), request.Url));
@@ -21,6 +23,7 @@ public class UrlController(IUrlService urlService, AppSettings settings) : Contr
     // 302, not 301: browsers cache permanent redirects, so repeat visits would never reach
     // the service and would not be counted.
     [HttpGet("/{code}")]
+    [RateLimit(RateLimitPolicy.Read)]
     public async Task<IActionResult> RedirectToOriginal(string code)
     {
         var original = await urlService.GetOriginalUrl(code);

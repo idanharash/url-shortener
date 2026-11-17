@@ -1,0 +1,10 @@
+# Keep the build context small and free of local secrets and build output.
+**/bin/
+**/obj/
+**/TestResults/
+**/.vs/
+**/*.user
+.git/
+.github/
+.env
+docs/

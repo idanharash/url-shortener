@@ -8,6 +8,7 @@ namespace UrlShortener.UnitTests;
 public class CacheServiceTests
 {
     private static readonly TimeSpan Ttl = TimeSpan.FromHours(1);
+    private static readonly TimeSpan NotFoundTtl = TimeSpan.FromMinutes(1);
 
     private readonly Mock<IDatabase> _db = new();
     private readonly CacheService _cache;
@@ -16,7 +17,7 @@ public class CacheServiceTests
     {
         var redis = new Mock<IConnectionMultiplexer>();
         redis.Setup(r => r.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(_db.Object);
-        _cache = new CacheService(redis.Object, new CacheSettings { EntryTtl = Ttl }, NullLogger<CacheService>.Instance);
+        _cache = new CacheService(redis.Object, new CacheSettings { EntryTtl = Ttl, NotFoundTtl = NotFoundTtl }, NullLogger<CacheService>.Instance);
     }
 
     [Theory]
@@ -36,7 +37,16 @@ public class CacheServiceTests
         await _cache.SetOriginalUrlAsync("abc12", "https://example.com");
 
         _db.Verify(db => db.StringSetAsync((RedisKey)"shorturl:abc12", (RedisValue)"https://example.com", Ttl,
-            false, It.IsAny<When>(), It.IsAny<CommandFlags>()), Times.Once);
+            false, When.Always, It.IsAny<CommandFlags>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetNotFoundAsync_UsesTheShortTtl_AndNeverOverwritesAMapping()
+    {
+        await _cache.SetNotFoundAsync("abc12");
+
+        _db.Verify(db => db.StringSetAsync((RedisKey)"shorturl:abc12", (RedisValue)string.Empty, NotFoundTtl,
+            false, When.NotExists, It.IsAny<CommandFlags>()), Times.Once);
     }
 
     [Fact]

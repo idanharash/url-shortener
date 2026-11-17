@@ -37,7 +37,7 @@ try
     });
     builder.Host.UseSerilog();
 
-    builder.Services.AddValidatedSettings<AppSettings>(builder.Configuration, AppSettings.SectionName);
+    var appSettings = builder.Services.AddValidatedSettings<AppSettings>(builder.Configuration, AppSettings.SectionName);
     builder.Services.AddValidatedSettings<RateLimitingSettings>(builder.Configuration, RateLimitingSettings.SectionName);
     builder.Services.AddValidatedSettings<ApiKeySettings>(builder.Configuration, ApiKeySettings.SectionName);
     builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
@@ -81,6 +81,7 @@ try
 
     app.UseExceptionHandler();
     app.UseStatusCodePages();
+    app.UseManagementPort(appSettings.ManagementPort);
 
     if (app.Environment.IsDevelopment())
     {
@@ -90,9 +91,8 @@ try
 
     app.UseRouting();
     app.UseHttpMetrics();
-    app.UseWhen(context => HttpMethods.IsPost(context.Request.Method) &&
-                           context.Request.Path.StartsWithSegments("/api/shorten"),
-        appBuilder => appBuilder.UseMiddleware<RateLimitingMiddleware>());
+    // After routing, so the middleware can read the endpoint's [RateLimit] policy.
+    app.UseMiddleware<RateLimitingMiddleware>();
     // After the rate limiter, so guessing API keys is rate limited too.
     app.UseAuthentication();
     app.UseAuthorization();

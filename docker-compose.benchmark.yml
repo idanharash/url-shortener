@@ -1,0 +1,6 @@
+# Benchmark only: the per-IP limit on redirects would otherwise reject most requests from a single
+# benchmark client. Use together with the normal files (see "Benchmark" in the README).
+services:
+  web:
+    environment:
+      RateLimiting__ReadPermitLimit: "10000000"

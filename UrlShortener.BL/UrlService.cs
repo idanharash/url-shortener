@@ -35,11 +35,17 @@ public class UrlService(
             return null;
 
         var originalUrl = await cache.GetOriginalUrlAsync(code);
+        if (originalUrl == ICacheService.NotFound)
+            return null; // looked up recently and not found: no database query for repeated guesses
+
         if (originalUrl is null)
         {
             var entry = await repository.GetByCode(code);
             if (entry is null)
+            {
+                await cache.SetNotFoundAsync(code);
                 return null;
+            }
 
             originalUrl = entry.OriginalUrl;
             await cache.SetOriginalUrlAsync(code, originalUrl);

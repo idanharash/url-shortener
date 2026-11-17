@@ -48,9 +48,12 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5000:8080"
+      - "127.0.0.1:5001:8081"   # /health and /metrics only: management port, reachable from this machine only
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_HTTP_PORTS: "8080;8081"
       App__PublicBaseUrl: http://localhost:5000
+      App__ManagementPort: "8081"
       Auth__ApiKeys__0: ${API_KEY:?Set API_KEY in .env (see .env.example)}
       Postgres__Host: db
       Postgres__Database: ${POSTGRES_DB:-url_shortener}
@@ -76,7 +79,7 @@ services:
       dockerfile: Dockerfile.worker
     restart: unless-stopped
     ports:
-      - "9091"   # /metrics on a random host port (so several replicas don't clash): docker compose port worker 9091
+      - "127.0.0.1::9091"   # /metrics on a random host port, this machine only (replicas don't clash): docker compose port worker 9091
     environment:
       DOTNET_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       Postgres__Host: db

@@ -94,6 +94,18 @@ public class UrlServiceTests
         var result = await _service.GetOriginalUrl("nope1");
 
         Assert.Null(result);
+        _cache.Verify(c => c.SetNotFoundAsync("nope1"), Times.Once);
+        _clicks.Verify(c => c.EnqueueClick(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetOriginalUrl_CachedAsNotFound_ReturnsNullWithoutTheDatabase()
+    {
+        _cache.Setup(c => c.GetOriginalUrlAsync("nope1")).ReturnsAsync(ICacheService.NotFound);
+
+        Assert.Null(await _service.GetOriginalUrl("nope1"));
+
+        _repository.Verify(r => r.GetByCode(It.IsAny<string>()), Times.Never);
         _clicks.Verify(c => c.EnqueueClick(It.IsAny<string>()), Times.Never);
     }
 

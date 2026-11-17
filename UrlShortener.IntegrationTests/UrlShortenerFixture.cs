@@ -81,6 +81,7 @@ public sealed class UrlShortenerFixture : IAsyncLifetime
         SetSetting("App__PublicBaseUrl", "http://localhost");
         SetSetting("Auth__ApiKeys__0", ApiKey);
         SetSetting("RateLimiting__PermitLimit", "100000"); // the tests create many links quickly
+        SetSetting("RateLimiting__ReadPermitLimit", "100000"); // and send hundreds of redirects from one client
         SetSetting("Worker__MetricsPort", FreeTcpPort().ToString(CultureInfo.InvariantCulture));
 
         _worker = WorkerHost.CreateBuilder([]).Build();

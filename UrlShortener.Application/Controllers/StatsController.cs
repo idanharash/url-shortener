@@ -1,10 +1,12 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using UrlShortener.Application.Middleware;
 using UrlShortener.Model.Service;
 
 namespace UrlShortener.Application.Controllers;
 
 [ApiController]
 [Route("api/stats")]
+[RateLimit(RateLimitPolicy.Read)]
 public class StatsController(IStatsService statsService) : ControllerBase
 {
     [HttpGet("{code}")]

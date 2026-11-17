@@ -5,9 +5,10 @@ using UrlShortener.Application.Settings;
 namespace UrlShortener.Application.Middleware;
 
 /// <summary>
-/// Fixed-window rate limit per client IP, stored in Redis so it holds across several app instances.
-/// Fails open: if Redis is unavailable, requests are allowed. Rate limiting protects against abuse,
-/// and blocking every user because the limiter's store is down would be worse.
+/// Fixed-window rate limit per client IP for endpoints marked with <see cref="RateLimitAttribute"/>, one counter
+/// per policy, stored in Redis so it holds across several app instances. Fails open: if Redis is unavailable,
+/// requests are allowed. Rate limiting protects against abuse, and blocking every user because the limiter's
+/// store is down would be worse.
 /// </summary>
 public class RateLimitingMiddleware(
     RequestDelegate next,
@@ -28,6 +29,20 @@ public class RateLimitingMiddleware(
 
     public async Task InvokeAsync(HttpContext context)
     {
+        var policy = context.GetEndpoint()?.Metadata.GetMetadata<RateLimitAttribute>()?.Policy;
+        if (policy is null)
+        {
+            await next(context);
+            return;
+        }
+
+        var (keyPrefix, permitLimit, window) = policy switch
+        {
+            RateLimitPolicy.Shorten => ("rl:shorten:", settings.PermitLimit, settings.Window),
+            RateLimitPolicy.Read => ("rl:read:", settings.ReadPermitLimit, settings.ReadWindow),
+            _ => throw new InvalidOperationException($"Unknown rate-limit policy {policy}.")
+        };
+
         // Behind a reverse proxy this is the proxy's address; see README "Known limitations".
         var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
@@ -36,8 +51,8 @@ public class RateLimitingMiddleware(
         {
             var raw = await _db.ScriptEvaluateAsync(IncrementScript, new
             {
-                key = (RedisKey)$"rl:shorten:{ip}",
-                windowMs = (long)settings.Window.TotalMilliseconds
+                key = (RedisKey)(keyPrefix + ip),
+                windowMs = (long)window.TotalMilliseconds
             });
             var result = ((RedisResult[]?)raw)!;
             count = (long)result[0];
@@ -50,9 +65,9 @@ public class RateLimitingMiddleware(
             return;
         }
 
-        if (count > settings.PermitLimit)
+        if (count > permitLimit)
         {
-            logger.LogWarning("Rate limit exceeded for {IP}", ip);
+            logger.LogWarning("Rate limit {Policy} exceeded for {IP}", policy, ip);
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.Response.Headers.RetryAfter = Math.Max(1, (long)Math.Ceiling(remainingMs / 1000.0)).ToString(CultureInfo.InvariantCulture);
             await context.Response.WriteAsync("Rate limit exceeded. Try again later.");

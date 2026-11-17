@@ -11,6 +11,12 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
 {
     public const string PipelineName = "db-pipeline";
 
+    /// <summary>
+    /// Marks an operation the pipeline must not retry: if the commit succeeded but the reply was lost,
+    /// a retry would apply the write a second time.
+    /// </summary>
+    public static readonly ResiliencePropertyKey<bool> NotIdempotent = new("not-idempotent");
+
     private ResiliencePipeline Pipeline => pipelineProvider.GetPipeline(PipelineName);
 
     public async Task<ShortUrl?> GetByCode(string code)
@@ -31,13 +37,15 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
             using var session = sessionFactory.OpenSession();
             using var tx = session.BeginTransaction();
 
-            // ON CONFLICT DO NOTHING turns a code collision into "no row returned" instead of an exception
-            // that would poison the session (and be pointlessly retried).
+            // A collision with another URL returns no row instead of throwing (an exception would poison the
+            // session and be pointlessly retried). The same code with the same URL returns the stored row: that
+            // is this insert already committed by an earlier attempt whose reply was lost, so retrying is safe.
             var createdAt = await session.CreateSQLQuery(
                     """
                     INSERT INTO short_urls (code, original_url, click_count, created_at)
                     VALUES (:code, :originalUrl, 0, now() AT TIME ZONE 'utc')
-                    ON CONFLICT (code) DO NOTHING
+                    ON CONFLICT (code) DO UPDATE SET original_url = EXCLUDED.original_url
+                        WHERE short_urls.original_url = EXCLUDED.original_url
                     RETURNING created_at
                     """)
                 .AddScalar("created_at", NHibernateUtil.UtcDateTime)
@@ -56,15 +64,27 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
     public async Task IncrementClickCountAsync(string code)
     {
         using var activity = Telemetry.Database.StartActivity("db increment click_count");
-        await Traced(activity, () => Pipeline.ExecuteAsync(async ct =>
+
+        // Not idempotent, so no in-process retry (the circuit breaker still applies). A transient failure
+        // reaches the consumer, which requeues the message: redelivery is the only retry path.
+        var context = ResilienceContextPool.Shared.Get();
+        context.Properties.Set(NotIdempotent, true);
+        try
         {
-            using var session = sessionFactory.OpenSession();
-            // A single atomic UPDATE: concurrent consumers can never overwrite each other's increments.
-            await session.CreateSQLQuery("UPDATE short_urls SET click_count = click_count + 1 WHERE code = :code")
-                .SetParameter("code", code)
-                .ExecuteUpdateAsync(ct);
-            return true;
-        }));
+            await Traced(activity, () => Pipeline.ExecuteAsync(async ctx =>
+            {
+                using var session = sessionFactory.OpenSession();
+                // A single atomic UPDATE: concurrent consumers can never overwrite each other's increments.
+                await session.CreateSQLQuery("UPDATE short_urls SET click_count = click_count + 1 WHERE code = :code")
+                    .SetParameter("code", code)
+                    .ExecuteUpdateAsync(ctx.CancellationToken);
+                return true;
+            }, context));
+        }
+        finally
+        {
+            ResilienceContextPool.Shared.Return(context);
+        }
     }
 
     private static async Task<T> Traced<T>(System.Diagnostics.Activity? activity, Func<ValueTask<T>> action)

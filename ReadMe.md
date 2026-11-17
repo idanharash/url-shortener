@@ -83,7 +83,7 @@ flowchart LR
 
 | Flow | Path |
 |---|---|
-| **Shorten** | Validate URL → generate random code → `INSERT … ON CONFLICT DO NOTHING` (new code on collision) → cache the mapping |
+| **Shorten** | Validate URL → generate random code → `INSERT … ON CONFLICT` (new code on collision; safe to retry) → cache the mapping |
 | **Redirect** | Validate code format → Redis → (miss) PostgreSQL and re-cache → enqueue click → **302** |
 | **Click** | In-memory bounded buffer → background publisher (API) → RabbitMQ → consumer (Worker) → atomic `UPDATE` → ack |
 | **Stats** | Read from PostgreSQL, the single source of truth for counts |
@@ -98,7 +98,7 @@ flowchart LR
 
 **The consumer runs in its own process (`UrlShortener.Worker`).** Redirect traffic and click processing have different load profiles, so they scale separately: more API replicas for traffic, more Worker replicas for queue throughput (`docker compose up -d --scale worker=3`; RabbitMQ spreads messages across consumers, and the atomic `UPDATE` keeps counts exact). A failing or slow Worker never affects redirects; clicks just wait in the queue. The cost is one more deployable; both hosts share the same Infrastructure registrations (`AddPostgres`, `AddClickPublisher`, `AddClickConsumer`, …), so there is no duplicated setup.
 
-**Delivery is at-least-once, and counts are approximate by design.** A message is acked only after the database update, so a crash between the two can count a click twice. Clicks still in the in-memory buffer are lost if the process crashes. For analytics this is accepted; I deliberately did **not** add a transactional outbox, because writing a row per redirect to the database is exactly the cost the queue exists to avoid. Billing-grade counts would need idempotency keys plus an outbox or publisher confirms.
+**Delivery is at-least-once, and counts are approximate by design.** A message is acked only after the database update, so a crash between the two counts a click twice, and so does a database timeout after a commit that actually succeeded (the message is requeued). For that reason the increment is never retried in-process, which could add several duplicates; redelivery is the only retry path. Clicks still in the in-memory buffer are lost if the process crashes, and without publisher confirms a click handed to the client just before a connection drop can be lost too. For analytics this is accepted; I deliberately did **not** add a transactional outbox, because writing a row per redirect to the database is exactly the cost the queue exists to avoid. Billing-grade counts would need idempotency keys plus an outbox or publisher confirms.
 
 **The cache holds only the immutable mapping.** Redis stores `code → URL`, which never changes once created, so it can't become stale and needs no invalidation. Counts are never cached; an earlier version kept a counter inside the cached entry and it drifted under concurrency. Entries expire (`Cache:EntryTtl`) to bound Redis memory.
 
@@ -112,9 +112,9 @@ flowchart LR
 
 The consumer requeues messages while the database is unavailable (with a delay, so it slows down rather than spins) and sends malformed or non-retryable messages to a dead-letter queue instead of blocking the queue.
 
-**Short codes: 5 random Base62 characters.** Generated with a CSPRNG (`RandomNumberGenerator.GetString`, unbiased), so codes can't be enumerated sequentially. 62⁵ ≈ 916M possible codes. A collision is handled by `INSERT … ON CONFLICT DO NOTHING` and a new code (up to 5 attempts), with no exception-driven retries. The chance that one insert collides is *n / 916M* for *n* existing links: about 0.1% at 1M links and 1% at 10M. Before reaching tens of millions of links, the code length should grow to 6 (57B codes).
+**Short codes: 5 random Base62 characters.** Generated with a CSPRNG (`RandomNumberGenerator.GetString`, unbiased), so codes can't be enumerated sequentially. 62⁵ ≈ 916M possible codes. A collision is handled by `INSERT … ON CONFLICT` and a new code (up to 5 attempts), with no exception-driven retries. The same code with the same URL returns the stored row instead of a collision, so a retried insert whose first commit succeeded doesn't leave an orphan link. The chance that one insert collides is *n / 916M* for *n* existing links: about 0.1% at 1M links and 1% at 10M. Before reaching tens of millions of links, the code length should grow to 6 (57B codes).
 
-**Retries only for transient errors.** The database pipeline (Polly) retries connection drops and timeouts with exponential backoff and jitter, behind a circuit breaker. Constraint violations and SQL errors are not retried; retrying them only adds latency before the same failure.
+**Retries only for transient errors.** The database pipeline (Polly) retries connection drops and timeouts with exponential backoff and jitter, behind a circuit breaker. Constraint violations and SQL errors are not retried; retrying them only adds latency before the same failure. Writes that are not idempotent (the click increment) opt out of the retry.
 
 **Rate limiting in Redis.** A fixed window per client IP, implemented as one atomic Lua script (`INCR` and `PEXPIRE` together, so a crash can't leave a key without expiry). It's stored in Redis rather than in memory so the limit holds across several instances. It fails open: blocking all users because the limiter's store is down would be worse than briefly allowing extra requests.
 
@@ -165,7 +165,7 @@ dotnet test UrlShortener.IntegrationTests     # integration tests only
 | Project | What it proves |
 |---|---|
 | `UrlShortener.UnitTests` | Business rules in isolation: code collisions and the retry limit, cache hit/miss/fallback, rejecting malformed codes without I/O, URL validation (`javascript:`, `file:`, self-referencing URLs), stats. |
-| `UrlShortener.IntegrationTests` | The real API and the real Worker against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
+| `UrlShortener.IntegrationTests` | The real API and the real Worker against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error, and a retried insert returns the stored row; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
 
 CI runs the build and both test projects (GitHub's Linux runners have Docker) and builds both Docker images on every push.
 

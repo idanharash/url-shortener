@@ -58,7 +58,9 @@ public sealed class ClickQueueProducer(RabbitMqSettings settings, ILogger<ClickQ
             {
                 while (await _buffer.Reader.WaitToReadAsync(stoppingToken))
                 {
-                    // Peek, publish, then remove: a click is only taken out of the buffer once it was handed to the broker.
+                    // Peek, publish, then remove: a click leaves the buffer once BasicPublish returns, i.e. once the
+                    // client library accepted it. Without publisher confirms that does not prove the broker stored it:
+                    // a connection drop right afterwards can still lose it (see "Delivery" in the README).
                     while (_buffer.Reader.TryPeek(out var code))
                     {
                         Publish(code);

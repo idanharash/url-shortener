@@ -38,7 +38,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddResiliencePipeline(UrlRepository.PipelineName, builder => builder
             .AddRetry(new RetryStrategyOptions
             {
-                ShouldHandle = new PredicateBuilder().Handle<Exception>(TransientDbErrors.IsTransient),
+                // Transient errors only, and never for writes marked as not idempotent.
+                ShouldHandle = args => ValueTask.FromResult(
+                    args.Outcome.Exception is { } ex
+                    && TransientDbErrors.IsTransient(ex)
+                    && !args.Context.Properties.GetValue(UrlRepository.NotIdempotent, false)),
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(200),
                 BackoffType = DelayBackoffType.Exponential,

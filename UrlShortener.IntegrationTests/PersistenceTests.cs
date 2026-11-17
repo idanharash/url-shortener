@@ -20,4 +20,19 @@ public sealed class PersistenceTests(UrlShortenerFixture fixture)
         Assert.Null(second); // INSERT ... ON CONFLICT DO NOTHING: no exception, no overwrite
         Assert.Equal("https://example.com/first", (await repository.GetByCode("Dup01"))?.OriginalUrl);
     }
+
+    [Fact]
+    public async Task TryCreate_IsSafeToRetry_WhenTheSameCodeAndUrlAreAlreadyStored()
+    {
+        using var scope = fixture.Factory.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IUrlRepository>();
+
+        // A retry after a commit whose reply was lost: must return the stored row, not report a collision.
+        var first = await repository.TryCreateAsync("Rtry1", "https://example.com/retry");
+        var retried = await repository.TryCreateAsync("Rtry1", "https://example.com/retry");
+
+        Assert.NotNull(first);
+        Assert.NotNull(retried);
+        Assert.Equal(first.CreatedAt, retried.CreatedAt);
+    }
 }

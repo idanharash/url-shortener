@@ -2,8 +2,8 @@ namespace UrlShortener.Model;
 
 public class ShortUrl
 {
-    public virtual string Code { get; set; } = null!;
-    public virtual string OriginalUrl { get; set; } = null!;
-    public virtual DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public virtual long ClickCount { get; set; }
+    public string Code { get; set; } = null!;
+    public string OriginalUrl { get; set; } = null!;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public long ClickCount { get; set; }
 }

@@ -1,7 +1,6 @@
-using FluentNHibernate.Cfg;
-using FluentNHibernate.Cfg.Db;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Polly;
@@ -27,10 +26,9 @@ public static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddPostgres(this IServiceCollection services, IConfiguration config)
     {
         var postgres = services.AddValidatedSettings<PostgresSettings>(config, PostgresSettings.SectionName);
-        services.AddSingleton(Fluently.Configure()
-            .Database(PostgreSQLConfiguration.Standard.ConnectionString(postgres.ToConnectionString()))
-            .Mappings(m => m.FluentMappings.AddFromAssemblyOf<UrlRepository>())
-            .BuildSessionFactory());
+        // Creating the data source opens no connection: the app starts even while PostgreSQL is down, and
+        // connections are pooled and opened per command. Registered via a factory so the container disposes it.
+        services.AddSingleton(_ => NpgsqlDataSource.Create(postgres.ToConnectionString()));
 
         // Only transient errors (connection drops, timeouts) are retried or count towards the breaker;
         // retrying a constraint violation or a SQL bug just delays the same failure.

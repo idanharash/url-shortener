@@ -1,4 +1,4 @@
-using NHibernate;
+using Npgsql;
 using Polly;
 using Polly.Registry;
 using UrlShortener.Infrastructure.Observability;
@@ -7,7 +7,11 @@ using UrlShortener.Model.Repository;
 
 namespace UrlShortener.Infrastructure.Persistence;
 
-public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelineProvider<string> pipelineProvider) : IUrlRepository
+/// <summary>
+/// Three explicit SQL statements on one table, run through Npgsql directly. Every statement is a single
+/// atomic command, so none needs an explicit transaction.
+/// </summary>
+public class UrlRepository(NpgsqlDataSource dataSource, ResiliencePipelineProvider<string> pipelineProvider) : IUrlRepository
 {
     public const string PipelineName = "db-pipeline";
 
@@ -24,8 +28,21 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
         using var activity = Telemetry.Database.StartActivity("db get short_url");
         return await Traced(activity, () => Pipeline.ExecuteAsync(async ct =>
         {
-            using var session = sessionFactory.OpenSession();
-            return await session.GetAsync<ShortUrl>(code, ct);
+            await using var command = dataSource.CreateCommand(
+                "SELECT code, original_url, created_at, click_count FROM short_urls WHERE code = @code");
+            command.Parameters.AddWithValue("code", code);
+
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct))
+                return null;
+
+            return new ShortUrl
+            {
+                Code = reader.GetString(0),
+                OriginalUrl = reader.GetString(1),
+                CreatedAt = AsUtc(reader.GetDateTime(2)),
+                ClickCount = reader.GetFieldValue<long>(3)
+            };
         }));
     }
 
@@ -34,30 +51,23 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
         using var activity = Telemetry.Database.StartActivity("db insert short_url");
         return await Traced(activity, () => Pipeline.ExecuteAsync(async ct =>
         {
-            using var session = sessionFactory.OpenSession();
-            using var tx = session.BeginTransaction();
+            // A collision with another URL returns no row instead of throwing (retrying a constraint violation
+            // is pointless). The same code with the same URL returns the stored row: that is this insert already
+            // committed by an earlier attempt whose reply was lost, so retrying is safe.
+            await using var command = dataSource.CreateCommand(
+                """
+                INSERT INTO short_urls (code, original_url, click_count, created_at)
+                VALUES (@code, @originalUrl, 0, now() AT TIME ZONE 'utc')
+                ON CONFLICT (code) DO UPDATE SET original_url = EXCLUDED.original_url
+                    WHERE short_urls.original_url = EXCLUDED.original_url
+                RETURNING created_at
+                """);
+            command.Parameters.AddWithValue("code", code);
+            command.Parameters.AddWithValue("originalUrl", originalUrl);
 
-            // A collision with another URL returns no row instead of throwing (an exception would poison the
-            // session and be pointlessly retried). The same code with the same URL returns the stored row: that
-            // is this insert already committed by an earlier attempt whose reply was lost, so retrying is safe.
-            var createdAt = await session.CreateSQLQuery(
-                    """
-                    INSERT INTO short_urls (code, original_url, click_count, created_at)
-                    VALUES (:code, :originalUrl, 0, now() AT TIME ZONE 'utc')
-                    ON CONFLICT (code) DO UPDATE SET original_url = EXCLUDED.original_url
-                        WHERE short_urls.original_url = EXCLUDED.original_url
-                    RETURNING created_at
-                    """)
-                .AddScalar("created_at", NHibernateUtil.UtcDateTime)
-                .SetParameter("code", code)
-                .SetParameter("originalUrl", originalUrl)
-                .UniqueResultAsync<DateTime?>(ct);
-
-            await tx.CommitAsync(ct);
-
-            return createdAt is null
-                ? null
-                : new ShortUrl { Code = code, OriginalUrl = originalUrl, CreatedAt = createdAt.Value, ClickCount = 0 };
+            return await command.ExecuteScalarAsync(ct) is DateTime createdAt
+                ? new ShortUrl { Code = code, OriginalUrl = originalUrl, CreatedAt = AsUtc(createdAt), ClickCount = 0 }
+                : null;
         }));
     }
 
@@ -73,11 +83,11 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
         {
             await Traced(activity, () => Pipeline.ExecuteAsync(async ctx =>
             {
-                using var session = sessionFactory.OpenSession();
                 // A single atomic UPDATE: concurrent consumers can never overwrite each other's increments.
-                await session.CreateSQLQuery("UPDATE short_urls SET click_count = click_count + 1 WHERE code = :code")
-                    .SetParameter("code", code)
-                    .ExecuteUpdateAsync(ctx.CancellationToken);
+                await using var command = dataSource.CreateCommand(
+                    "UPDATE short_urls SET click_count = click_count + 1 WHERE code = @code");
+                command.Parameters.AddWithValue("code", code);
+                await command.ExecuteNonQueryAsync(ctx.CancellationToken);
                 return true;
             }, context));
         }
@@ -86,6 +96,10 @@ public class UrlRepository(ISessionFactory sessionFactory, ResiliencePipelinePro
             ResilienceContextPool.Shared.Return(context);
         }
     }
+
+    // created_at is "timestamp without time zone" holding UTC (written with now() AT TIME ZONE 'utc').
+    // Npgsql reads it as DateTimeKind.Unspecified; marking it UTC keeps the API returning "...Z".
+    private static DateTime AsUtc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     private static async Task<T> Traced<T>(System.Diagnostics.Activity? activity, Func<ValueTask<T>> action)
     {

@@ -122,7 +122,7 @@ The consumer requeues messages while the database is unavailable (with a delay, 
 
 **API keys for creating links; redirects and stats stay public.** Link creation is done by machine clients, for which an API key in the `X-Api-Key` header is the standard and simplest fit. It is implemented as a regular ASP.NET Core authentication scheme, so the endpoint only declares `[Authorize]`. Several keys can be valid at once (rotation without downtime), keys must be at least 32 characters, comparison is constant-time over SHA-256 hashes, and the app refuses to start without a key, so the endpoint can't end up unprotected by accident. Authentication runs after the rate limiter, so key guessing is rate limited too. JWT with an identity provider becomes the right choice once there are user accounts ("my links"); because the auth is a pluggable scheme, that is a registration change, not a rewrite.
 
-**NHibernate with targeted raw SQL.** Mappings handle reads; the two operations that must be atomic (insert-if-absent and increment) are single SQL statements. For a model this small, Dapper or EF Core would be equally valid choices.
+**Direct Npgsql, no ORM.** Persistence is three explicit SQL statements on one table: insert-if-absent, lookup by code and the atomic increment, each a single atomic command. An ORM would add a dependency and a mapping layer without simplifying any of them, and the two that must be atomic would stay raw SQL anyway. A singleton `NpgsqlDataSource` pools connections and opens none at startup, so the API and the Worker start even while PostgreSQL is down.
 
 ---
 
@@ -220,7 +220,7 @@ UrlShortener.Application     ASP.NET Core API: controllers, middleware, health c
 UrlShortener.Worker          Background service: consumes click events and stores them (scales independently)
 UrlShortener.BL              Business logic: URL creation, redirects, stats, click handling
 UrlShortener.Model           Entities, DTOs and the interfaces the BL depends on
-UrlShortener.Infrastructure  PostgreSQL (NHibernate), Redis cache, RabbitMQ publisher/consumer, telemetry, and the DI registrations both hosts share
+UrlShortener.Infrastructure  PostgreSQL (Npgsql), Redis cache, RabbitMQ publisher/consumer, telemetry, and the DI registrations both hosts share
 UrlShortener.Migrations      FluentMigrator schema migrations (separate runner, not on app start)
 UrlShortener.UnitTests       Unit tests: business rules in isolation (xUnit, Moq)
 UrlShortener.IntegrationTests  Real app against real PostgreSQL/Redis/RabbitMQ (Testcontainers)

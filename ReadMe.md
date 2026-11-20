@@ -169,7 +169,7 @@ dotnet test UrlShortener.IntegrationTests     # integration tests only
 | Project | What it proves |
 |---|---|
 | `UrlShortener.UnitTests` | Business rules in isolation: code collisions and the retry limit, cache hit/miss/fallback and not-found caching, rejecting malformed codes without I/O, URL validation (`javascript:`, `file:`, self-referencing URLs), stats. |
-| `UrlShortener.IntegrationTests` | The real API and the real Worker against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error, and a retried insert returns the stored row; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
+| `UrlShortener.IntegrationTests` | The real API and the real Worker against real PostgreSQL, Redis and RabbitMQ (Testcontainers, `WebApplicationFactory`, the production migrations): **500 concurrent redirects produce exactly 500 counted clicks**; shorten → 302 → stats end to end; a code collision returns no row instead of an error, and a retried insert returns the stored row; a click count goes past the 32-bit range; with Redis down, redirects still work and `/health` reports `Degraded`; a malformed queue message lands in the dead-letter queue; invalid URLs get 400 and unknown codes 404. |
 
 CI runs the build and both test projects (GitHub's Linux runners have Docker) and builds both Docker images on every push.
 
@@ -221,7 +221,7 @@ UrlShortener.Worker          Background service: consumes click events and store
 UrlShortener.BL              Business logic: URL creation, redirects, stats, click handling
 UrlShortener.Model           Entities, DTOs and the interfaces the BL depends on
 UrlShortener.Infrastructure  PostgreSQL (Npgsql), Redis cache, RabbitMQ publisher/consumer, telemetry, and the DI registrations both hosts share
-UrlShortener.Migrations      FluentMigrator schema migrations (separate runner, not on app start)
+UrlShortener.Migrations      FluentMigrator schema migrations (separate runner, not on app start); ClickCountToBigint rewrites the table under a lock, see its comment
 UrlShortener.UnitTests       Unit tests: business rules in isolation (xUnit, Moq)
 UrlShortener.IntegrationTests  Real app against real PostgreSQL/Redis/RabbitMQ (Testcontainers)
 UrlShortenerBenchmark        Redirect latency benchmark
